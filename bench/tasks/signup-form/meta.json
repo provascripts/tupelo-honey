@@ -1,8 +1,0 @@
-{
-  "id": "signup-form",
-  "lang": "html",
-  "type": "web",
-  "category": "ui-component",
-  "checks": ["viewport", "css", "labels", "cta"],
-  "min_sections": 0
-}

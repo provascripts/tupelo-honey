@@ -1,10 +1,17 @@
 {
-  "name": "honey",
-  "version": "1.4.0",
-  "description": "Honey (I Shrunk the AI) — three reflexive levers that cut agent token cost: less code (YAGNI/stdlib-first), less prose, and denser agent-to-agent handoffs (ESON/compact-JSON). Plus on-demand satellites (review, eco, gain, compress) and a hive of read-only subagents that return compressed handoffs. Auto-intensity lite/full/ultra; correctness and safety-critical paths stay exact.",
-  "author": { "name": "Green-PT", "url": "https://github.com/Green-PT" },
-  "homepage": "https://github.com/Green-PT/honey-for-devs",
-  "repository": "https://github.com/Green-PT/honey-for-devs",
+  "name": "tupelo-honey",
+  "version": "0.0.1",
+  "description": "Write less code and craft dense source files with antirez-style comments, deep modules (Ousterhout), Spartan simplicity (Pike/djb), and SQLite-grade verification (Hipp). Built on Honey's reflexive levers and enforced by zero-token hooks; zero chat waste, exact safety paths.",
+  "author": {
+    "name": "provascripts"
+  },
   "license": "MIT",
-  "keywords": ["tokens", "yagni", "minimal", "concise", "cost", "terse", "subagents", "handoff", "eso"]
+  "keywords": [
+    "systems-programming",
+    "token-efficiency",
+    "honey-for-devs",
+    "deep-modules",
+    "differential-fuzzing",
+    "fault-injection"
+  ]
 }

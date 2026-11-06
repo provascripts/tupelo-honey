@@ -1,222 +1,117 @@
-<!-- AUTO-GENERATED from skills/honey/SKILL.md by scripts/build-rules.js. Edit the source, then run: node scripts/build-rules.js -->
+# AGENTS.md — Systems Craft + Honey (v5.0, language-agnostic)
 
-# Honey (I Shrunk the AI)
+Write less code, waste zero chat tokens, and craft source files with the comment mastery and verification rigor of world-class systems software: antirez ("Writing system software: code comments", `rax`, `sds`), Pike (data dominates), Ousterhout (deep modules), Hipp (SQLite verification), djb (safe primitives, don't parse). Apply these rules as a reflexive writing style; never spend reasoning tokens deciding how to comply.
 
-Three levers cut what an LLM emits. Volume is cost; most volume is waste.
+## 0. Scope, Precedence & Modes
+- **Scope:** any language. Examples are illustrative: translate them to the language's idiomatic comment/doc syntax.
+- **Priority order:** explicit user request > this file > `honey-for-devs` > repo conventions. Repo and language conventions win on *form* (doc syntax, style guide, file layout); this file governs *what knowledge* comments and docs must carry.
+- **Modes:** `/honey [lite|full|ultra|off]` switches the current session; `/honey default <mode>` persists the default (initially `full`) via `bin/craft-mode.sh`, re-injected at every session start; `/honey` alone returns to it.
+  - `full`: terse chat (Lever 2); every code rule.
+  - `lite`: chat may explain in full sentences; Lever 1 and all comment rules unchanged.
+  - `ultra`: answer-only chat and loop reports; dense reading for large read-only files (§6); code comments unchanged.
+  - `off`: no chat compression; Lever 1, comment rules and zero-token hooks stay on.
+  - **Step up to `lite`, never down,** when brevity would drop correctness: a subtle bug, a trade-off, a correctness argument, a learner who needs the explanation.
+- **Hard boundaries for Honey:**
+  - Never apply Lever 2 ("don't narrate code") or Lever 3 (compressed payloads) to code comments or docs: their reader is a human.
+  - Never abbreviate prose words or identifiers: `config`, `implementation`, `request`, `response`, `function`, `authentication` cost 1 token each, the same as `cfg`, `impl`, `req`, `res`, `fn`, `auth`. Terseness comes from dropping filler words, never from shortening words.
+  - For `honey-review`, `craft-review`, `hive-reviewer` and `hive-craft-reviewer`, "redundant / narration comment" means **Trivial and Backup only** (§5). Never cut Function, Design, Why, Teacher, Checklist or Guide comments.
+  - Dispatched subagents (`hive-builder`) must follow §4–§6. If syncing comments exceeds a subagent's file-count guard, the orchestrator syncs them in the same change.
+  - If `honey-compress` runs on this file, keep all 9 comment kinds distinct and code/ASCII blocks verbatim. (Without Honey installed, ignore Honey references.)
 
-1. **Less code** — most code needn't exist. The cheapest line is the one never written.
-2. **Less prose** — most words around code are filler. The reader wants the answer.
-3. **Denser agent-to-agent messages** — when the reader is another agent, use the
-   most token-efficient wire format it parses losslessly.
+## 1. Lever 1 — Less Code, Deeper Modules
+- **Simplicity is hard-won:** fight complexity at its two roots, unwillingness to make design sacrifices and accumulation of design errors. Prefer dropping a marginal requirement over complicating the core architecture (record sacrifices per §4). Pull complexity downward into deep modules with narrow public interfaces: one guard in the shared primitive beats one guard per call site, so grep all callers before patching.
+- **Ladder first, then design:** needs to exist (YAGNI)? → existing code → stdlib → language native → installed dependency → one line → minimum deep module; stop at the first rung that works. For non-trivial additions (new data structure, module, service, public API change, > 100 lines or ≥ 3 distinct logical phases) list 2–3 candidate designs in chat, 1 line each, plus the chosen one and why (in `lite`), then **proceed immediately**. **Stop and wait for approval** only if the choice changes a public API, a data/storage/wire format, or is irreversible (migrations, deletions).
+- **Data dominates (Pike):** choose and freeze explicit data structures before procedural logic. Prefer length-prefixed, binary-safe layouts over formats that need stateful parsers (djb).
+- **Measured trade-offs only:** performance tricks (custom memory layouts, caches, manual pooling, concurrency, vectorization, native extensions, bit packing) need a benchmark, profiler output, memory measurement or explicit user constraint, recorded in the Why comment or commit message. Without evidence, use the simplest data structure.
+- **Deep modules (Ousterhout):** D_mod = implementation LOC / public functions ≥ 15 (LOC = non-blank, non-comment lines).
+- **Cohesive functions, meaningful helpers:** keep sequential steps together when they share local state and form one transformation (e.g. `raxGenericInsert`), **provided** the function is segmented by Guide comments anchored to a Teacher comment. Extract helpers when they create a semantic boundary, isolate resource ownership, remove duplication or enable independent tests; a single-caller helper under 30 LOC without one of these benefits, named in a `Why:` comment, is inlined.
+- **Centralized cleanup:** a function acquiring ≥ 2 fallible resources or allocations tears down in one place: `goto cleanup`/`oom` in C, `defer`/`errdefer` in Go/Zig, `?`/`Drop` in Rust, `with`/`using`, `ExitStack` or a single `try/finally` in Python/TS/Java. Allocate everything a mutation needs before touching the structure, so a failure leaves it intact.
+- **Bulk is generated, never typed:** ≥ 5 similar fixtures, tables or cases → write and run a generator.
+- **Dependencies:** use what the repo already has. Never add a heavy dependency without user approval.
 
-Levers 1–2 apply to everything you emit; Lever 3 only when output feeds another agent.
+## 2. Lever 2 — Terse Chat, Rich Source Comments
+- **Chat and reports:** answer first; no wind-up, pleasantries, hedging, recap or narration of self-evident diffs. Fragments over paragraphs.
+- **Carve-out:** Lever 2 never touches code comments or docs. Reject the "self-documenting code" myth: code shows *how*; comments explain what statements alone cannot, and lower the reader's cognitive load (ΔL_cog < 0).
+- **Decision rule:** before writing a comment, name the exact question it answers for a future reader ("why this order?", "what happens if the write fails?"). No question → no comment. Never write comments just to fill a category.
 
-**Apply reflexively, as a writing style — not a problem to analyze.** Don't
-deliberate which mode or rung applies; don't spend reasoning tokens on the skill
-itself. Reasoning is for the user's task. (On reasoning models, "think about how
-to comply" inflates the bill — defeating the purpose.)
+## 3. Verification & Testing Discipline
+- Every behavior change ships with a runnable test, or a 1-line explanation in chat if untestable. Bulk fixtures and cases are generated by code, never hand-typed.
+- **Stateful logic** (data structures, caches, state machines, parsers): seeded randomized/property-based workloads against a trivially correct reference model (Hypothesis, fast-check, proptest, QuickCheck, `go test -fuzz`, libFuzzer). `rax-test.c` compares against a plain hash table.
+- **Failure paths are code paths:** if code handles allocation, I/O, network, timeout or partial-write failures, inject those faults deterministically (fail the k-th call, k = 1..N) and verify state stays consistent and leak-free afterward. Test both sides of every limit (SQLite `testcase()`).
+- Never claim tests pass without executing them. State unverified paths in one closing chat line.
 
-## Intensity
+## 4. Where Knowledge Lives (Single Source of Truth)
+- **Module design**, invariants, data layout, concurrency rules, sacrifices → **one** Design comment per module at its entry point: C/C++ public header; Python module docstring or package `__init__.py`; Go `doc.go`; Rust `//!` in `lib.rs`/`mod.rs`; Java `package-info.java`; JS/TS header of the main/index file. Other files carry a pointer (`See design notes in <file>.`).
+- **API contract** → the language's doc-comment form (docstring, JSDoc/TSDoc, rustdoc `///`, Javadoc, godoc, C comment above the definition), in one place only, following repo convention.
+- **Local deliberate simplification** with a known ceiling → `shortcut:` at the code site. **Module-shaping sacrifice** → Design comment "Known limitations" plus a local `shortcut:` pointing to it.
+- **Known defect / unhandled concrete edge case** → `FIXME:` at the code site.
+- **Speculative ideas / future optimizations** → never in code, never implemented (YAGNI): one line in `TODO.md`/`DESIGN.md` if present, else mention once in chat and drop.
 
-Pick by keyword on the first cue; don't weigh it. `full` is the default and the
-fallback when unsure. User can pin (`honey ultra`). Mixed signals ("write X and
-explain it") → keep the explanation.
+## 5. The 9 Comment Kinds
+### Positive kinds (write and maintain)
+1. **Function** — inline API reference that spares callers the body: behavior; parameters and return values (skip types already expressed by the type system); errors, exceptions and error codes; **resource ownership and lifecycle** (who frees/closes/releases memory, files, connections, locks); mutation of arguments or shared state; side effects (I/O, globals, thread-safety). 1–2 lines for trivial internal helpers, a full contract for core/public APIs:
+   ```c
+   /* Seek the greatest key in the subtree at the current node. Return 0 on
+    * out of memory, otherwise 1. */
+   ```
+   ```python
+   def load_index(path: Path) -> Index:
+       """Load the on-disk index at `path`, rebuilding it if the checksum fails.
 
-| Mode | Trigger | Prose |
-|------|---------|-------|
-| **lite** | "explain", "how/why", "should I", design/tradeoff Qs | keep — the explanation *is* the deliverable |
-| **full** | "write/add/fix/implement/build", or unsure | terse, fragments over paragraphs |
-| **ultra** | "just/quick/one-liner", trivial | answer-only, near-zero |
+       Raises IndexCorrupt if the rebuild also fails. The returned Index owns an
+       open file handle: callers must call close() or use it as a context manager.
+       """
+   ```
+2. **Design** — module overview: problem, core algorithms and structures, data/memory layout, concurrency rules, invariants, rejected alternatives, known limitations (placed per §4). **Observable design check:** stop and propose simpler alternatives in chat if explaining the design needs > 3 special cases (aim for ≤ 2), an invariant that cannot fit in one sentence, or "except when" more than twice.
+3. **Why** — why clear code must be written this exact way: ordering constraints, bug workarounds, protocol or API quirks, regressions ("moved before X due to bug Y; do not reorder"), so future cleanups or Honey simplifications cannot break it. Mandatory on every bug fix.
+4. **Teacher** — teaches the math, protocol, state machine or data-structure transformation so a generalist can maintain specialist code. Break multi-branch algorithms into numbered cases (`1.`, `2.`, `3a.`, `3b.`) and anchor each branch in the code with a Guide comment (`3a: Replace old node with split node.`). Exact ASCII diagrams for pointer/tree structures, state transitions and, where layout matters (structs, binary formats, wire protocols, `ctypes`, NumPy dtypes), memory layouts (`[hdr:32b][chars][pad][ptrs]`); mandatory before pointer arithmetic, bitfields, packed structs or flexible array members. Shapes: bracket strips, linear chains, indented trees, small branches (≤ 3 rows, as below), byte-offset tables (`0..3 header`, `4..n chars`); never multi-column box grids, their alignment breaks silently. Verify against the code: a wrong diagram is worse than none. Draw physical layouts with `[field:size]` cells in declaration order (`[len:1B][alloc:1B][flags:1B][buf: len bytes]`; `B` bytes, `b` bits; `header`, `pad`, `payload` are synthetic) so the hooks can check names, order and widths, and pin them with a compile-time or test assertion on `sizeof`/`offsetof` (or the language's form, see `craft-code`) so the compiler checks what no script can.
+   ```text
+   Node "ANNIBALE" -> "SCO" -> [], inserting "ANNIENTARE".
+   $SPLITPOS = 4 (first mismatch: 'B' in node, 'E' in key).
+                 |B| -> "ALE" -> "SCO" -> []
+       "ANNI" -> |-|
+                 |E| -> (insertion continues) "NTARE" -> []
+   ```
+5. **Checklist** — coupled edits or strict step ordering. First enforce the coupling in code (single table, exhaustive `match`/`switch`, `static_assert`, a test that fails); if impossible, place the comment at both ends:
+   ```python
+   # WARNING: If you add a state here, update STATE_LABELS in ui/labels.py as well.
+   ```
+6. **Guide** — one short line before a logical block stating its goal (`// Free the query buffer.`, `// 1: Save next pointer.`). Mandatory in cohesive functions ≥ 40 LOC or with ≥ 3 distinct phases: one every 15–25 LOC; ≥ 80 LOC adds a numbered step map with matching step headers. Never "redundant narration".
+### Negative kinds (avoid or control)
+7. **Trivial** — reading cost ≥ the code itself (`count += 1  # Increment count.`). Delete on sight; if 1–3 lines are unclear, rename instead. Only Trivial and Backup comments count as "redundant".
+8. **Debt** — `shortcut:` and `FIXME:` only, never a bare `TODO`; ceiling and trigger on line 1:
+   ```python
+   # shortcut: O(N) scan, fine under ~10k entries; add an index past that.
+   ```
+   ```go
+   // FIXME: empty keys not handled; callers must reject them until fixed.
+   ```
+   Markers count only in comments starting with `#`, `//`, `--` or `/*` (`craft-debt-scan.sh`, `honey-debt`); audit other syntaxes with `grep`. Never invent issue IDs; delete resolved markers in the same diff.
+9. **Backup** — commented-out code or debug prints: forbidden, git is the backup. Debug logging behind a flag, log level or compile-time switch is code, not backup: keep it.
 
-Lever 1 (code ladder) never turns off, in any mode. **ultra** still keeps one line
-naming the main edge case (e.g. "raises `KeyError` on a missing key — use `.get`")
-— answer-only ≠ edge-case-blind.
+## 6. Comment Maintenance & Context Hygiene
+- **Preserve** every comment that remains true. Never shorten, reword or compress valid comments to save tokens.
+- **Update in the same diff** every comment your edit falsifies, including **outside the edited hunk**: doc comments at the definition *and* at every declaration (header, interface, `.pyi`/`.d.ts`, public docs), the Design comment, coupled Checklist comments, `shortcut:` triggers. Find them with `grep -rnw <symbol>`; for generic names (`get`, `close`, `parse`, `run`, `index`) grep the qualified form (`Index.close`, `index_close`) scoped to the module's directory, `grep -l` first. LSP "find references" does not search comments: it never replaces the grep. **Delete** comments that have become false.
+- **Locate before reading:** Grep/Glob declarations first, then Read with offset/limit; headers, Design and Function comments before bodies. `ultra`: read-only files ≥ 6000 chars via dense reading (`honey-px` if installed), never a file you will Edit.
+- **Aggregate in code:** counts, sorts, dedups, diffs and line measurements come from a command or script, never from reasoning.
+- **Agent-to-agent only (Lever 3):** subagent results are minified JSON (columnar when uniform; ESON only when asked), records keyed by stable `id` (never position), with an `n` count checksum verified before use. Never show these payloads to the user: render them.
 
-**Step up a mode, not down, when terseness would drop correctness** — a subtle bug,
-a tradeoff, a correctness argument, or a learner who needs the explanation. Keep
-Lever 1, ease Lever 2. Brevity that forces a follow-up round-trip costs more than it saved.
+## 7. Plugin Skills, Agents & Hooks
+- Load on match: `craft-design` (new module, data structure, header, format, trade-off) · `craft-code` (implementation, refactoring, error cleanup, `*Show` dumpers) · `craft-review` (diff review, delete-list, comment sync, debt) · `craft-verify` (tests, differential fuzzing, fault injection).
+- Subagents: `hive-craft-scout` maps modules and invariants; `hive-craft-reviewer` audits a diff. Both return Lever 3 JSON.
+- Zero-token hooks print only on violations; fix what they report before finishing. After Edit/Write: `craft-debt-scan.sh` (markers) and `craft-comment-sync.py` (orphaned symbols, Backup, Trivial, Vague, `[field:size]` diagrams vs their struct). At Stop: `craft-metrics.py --gate` (D_mod, single-caller helpers, Guide rhythm, missing Function/Design/Teacher comments, layouts without a size/offset assertion). Beyond names, order and widths the scripts check presence, never quality: what a comment says is still yours to get right.
+- Languages: comment checks cover C/C++/Objective-C/CUDA, Java, C#, Kotlin, Swift, Scala, Groovy, Dart, Solidity, PHP, Go, Rust, Zig, JS/TS, Python, shell, Ruby, Perl, R, Elixir, Crystal, Julia, Nim, PowerShell, Lua, SQL, Haskell, Lisps, OCaml, F#, Erlang, Fortran, VB; function metrics all but SQL, Haskell, Erlang, Fortran, VB, Tcl. Other files are skipped, never guessed.
 
-## Lever 1 — minimum code that needs to exist
+## 8. This Repository (`tupelo-honey` plugin)
+- Layout: only `plugin.json` inside `.claude-plugin/`; `skills/ agents/ commands/ hooks/ bin/` at the root; kebab-case names; paths via `${CLAUDE_PLUGIN_ROOT}`. `bin/` holds runtime scripts (on the Bash PATH while the plugin is enabled), `scripts/` maintenance tools; shared lexer and design notes in `bin/craftlib.py`.
+- Stack: Bash + Python 3.8+ stdlib only; Markdown skills and agents with YAML frontmatter.
+- Test: `python3 tests/test-bin.py` (from Git Bash on Windows). Validate: `claude plugin validate .`
+- Generated mirrors, never edited by hand: `.cursor/rules/systems-craft.mdc` (from this file) and `.agents/skills/` (from `skills/`). After editing either source run `bash scripts/sync-mirrors.sh`; the tests fail on drift.
 
-Understand the problem *before* you climb — read the task and the code it touches,
-trace the real flow end to end, then pick a rung. A small diff in the wrong place
-isn't lazy, it's a second bug.
-
-Then walk the ladder; stop at the first rung that works:
-
-1. **Needs to exist?** Best move is no code — config, an existing call site, or
-   deleting the need. Say so instead of building.
-2. **Already in this repo?** Search before you write: the helper, util, validator,
-   or pattern is often already here. Reusing it is the cheapest rung there is —
-   zero new lines, and it stays consistent with the codebase.
-3. **Stdlib** — don't hand-roll `itertools`/`pathlib`/`collections`/`datetime`.
-4. **Language native** — operator/comprehension/idiom over a helper; dict lookup over an if-ladder.
-5. **Installed dependency** — use what the project has; don't add one for four
-   lines, don't reimplement one you already have.
-6. **One line** before a block.
-7. **Minimum block** — no speculative params, no "might need it later" branches, no single-caller abstraction.
-
-Prefer editing what exists over adding; a new function/file/class/layer must earn
-its place. Speculative generality is the costliest agent habit — code for imagined
-requirements is pure overhead, and the requirement usually never arrives.
-
-**Fix the cause, not the symptom — it's also the smaller diff.** A bug report names
-a symptom. Grep the callers of the function you're about to touch: one guard in the
-shared function is fewer lines than one guard per call site, *and* it fixes the
-sibling callers the ticket didn't mention. Patching only the named path leaves the
-bug alive and the diff bigger.
-
-**Mark deliberate shortcuts.** A simplification with a known ceiling (global lock,
-O(n²) scan, naive heuristic) gets a `shortcut:` comment naming the ceiling *and* the
-trigger to revisit — `shortcut: O(n²), fine under ~1k rows; index if it grows`. Without
-a trigger, "later" means never. `honey-debt` harvests these into a ledger.
-
-**Bulk is generated, never typed.** Asked for N similar files/cases/fixtures/locales:
-write the small generator and run it — template once, not the bulk. Skip when the
-generator would outweigh what it generates.
-
-### Never cut (lazy ≠ broken)
-
-Minimal code missing its safety-critical parts isn't minimal — it's unfinished.
-Never simplify away:
-
-- **Input validation** at trust boundaries (user input, network, files, env).
-- **Error handling** that prevents data loss or corruption.
-- **Security** — auth checks, escaping, secrets handling.
-- **Accessibility basics** — labels, roles, keyboard paths.
-- **Visual/UX design when the deliverable is user-facing** — for landing pages,
-  marketing sites, and UI components, polish (layout depth, hero composition,
-  motion, responsive richness, on-brand visual hierarchy) *is* the requirement,
-  not "speculative." Markup that looks unfinished isn't minimal. The ladder still
-  trims *structure* (no dead markup, no unused framework), never how it looks.
-- **Names a provided stub, interface or public API defines** — constants, classes,
-  functions, signatures — even when they look unused: callers and tests you can't see
-  import them.
-- **Anything the user explicitly asked for.**
-
-Leave one runnable check (test/assert/invocation) behind for non-trivial logic.
-"Lazy" = no wasted code, not no proof it works.
-
-## Lever 2 — say less about it
-
-Fewest words that stay clear. Cut the scaffolding:
-
-- **Drop wind-up/wind-down** — no "Great question!", no "hope this helps!", no
-  restating the prompt, no announcing what you're about to do.
-- **Drop hedging** — "use X", not "you might possibly consider perhaps X". State real uncertainty once, briefly.
-- **Fragments and lists** over paragraphs when they carry the same info faster.
-- **Don't narrate readable code** — explain the *why* and the non-obvious, skip the *what*.
-- **Answer first**; context only if load-bearing.
-- **Name what you skipped or didn't verify** — one closing line ("not run: the e2e suite"). Nothing skipped → no line. Terse must not read as "all checked".
-
-**Keep exact — never compress** (precision, not prose):
-
-- **Code blocks** — verbatim, runnable; never "..." shorthand the user must expand.
-- **Identifiers, paths, commands, versions, error messages** — exact. "the auth middleware" ≠ `requireAuth()`.
-- **Anything to copy, paste, or run.**
-
-**Don't abbreviate prose words, at any intensity.** `cfg` / `impl` / `req` / `res` /
-`fn` / `auth` / `env` cost the *same* number of tokens as `config` / `implementation`
-/ `request` / `response` / `function` / `authentication` / `environment` — measured, one
-token each, on both the Claude and o200k tokenizers. Same for `→` versus a comma. You
-pay nothing and charge the reader to decode. Terseness comes from **dropping words**,
-never from shortening them. Well-known acronyms already in the domain (API, HTTP, DB,
-URL) are fine; inventing new ones is not.
-
-If compressing makes the reader work to recover the meaning, you moved cost, not removed it. Stop there.
-
-## Lever 3 — compress agent-to-agent messages
-
-When the reader is **another agent, not a human** (subagent return, orchestrator↔worker
-handoff, LLM-read payload), drop human formatting for the densest format the receiver
-parses losslessly. Fires **only** here — never emit a wire format as a user-facing answer.
-
-**These beat any format choice** — measured equal across formats, frontier models included:
-
-- **Compact, never pretty.** Minified over indented JSON — pretty-printing is ~+55% tokens for nothing.
-- **Address records by stable key, never by position.** "the finding with `id` X", not "the 37th" — ordinal lookup fails in every format, frontier models too.
-- **Aggregate in code, never make the model count rows.** "how many match X" scores ~0% even on frontier models. Same class: sort, dedupe, diff, date math — any deterministic transform runs in the program; pass the model the result.
-- **Number rows only if positional access is unavoidable** — an explicit `n` field restores it at ~+8% tokens.
-- **Long pipes: legend once, ids after.** Paths/names recurring across a multi-message pipe get short ids in a one-time legend (`F1=src/pipeline/export.ts`); reference ids thereafter. Loses on short pipes — two mentions don't pay for a legend.
-
-**Then pick the format by shape** (token rank is secondary — comprehension ties for real lookups):
-
-- **Default → compressed JSON.** Minified; for a uniform record array go columnar —
-  keys once, then value rows (`{"c":["sev","issue"],"r":[["H","token never expires"],…]}`).
-  ~−25% vs plain JSON, still valid JSON: every model and stdlib parses it, nothing to teach.
-- **Opt-in → ESON** ([spec + primer](https://github.com/Green-PT/honey-eson)), only for
-  high-volume, **cached**, record-array-heavy pipes you own end-to-end. Buys a further
-  ~6–10%, but costs a ~120-token format primer plus the bundled
-  `eson` codec, and *loses* below a few messages or on small/scalar payloads:
-  ```
-  !eson/1
-  findings[2]{sev,issue}
-  H\ttoken never expires
-  M\tno rate limiting
-  ```
-
-**Verify on read:** a dense misparse is *silent* — the reader may confabulate. Treat the
-declared count (`[N]`) as a checksum. **Safety carve-out:** auth/money/migrations/deletes/
-irreversible handoffs stay explicit and schema-validated.
-
-### Lever 3b — request less *input*
-
-Levers 1–3 cut what you emit; this cuts what you pull in. The cheapest input token is the
-one that never enters context. You can't out-compress a token you already paid for — so ask
-for less, don't crush what you fetched.
-
-- **Locate before reading.** `Grep`/`Glob` to the lines you need; `Read` with `offset`/`limit`
-  for one function — don't pull a whole 800-line file to answer about a 10-line body.
-- **Outline first, bodies on demand.** Unfamiliar big file: `Grep` its declaration
-  lines (`def`/`class`/`function`/`export`) for a skeleton, then `Read` only the bodies
-  you need — the outline answers most where/what questions without paying for the file.
-- **Don't re-read or re-paste what's already in context** — reference it. The harness already
-  tracks file state; re-Reading an unchanged file just re-pays for it.
-- **Offload bulk you must keep but mostly skim.** `cmd | eson stash` → a `<<honey:HASH>>` handle;
-  `eson retrieve <hash>` restores it verbatim when a detail is needed. (Lossy-skim variant for
-  huge uniform arrays: `eson crush`.) Reference the handle instead of pasting the blob again.
-- **Subagents: aggregate before returning** — N matching rows + the count, not all rows. Their
-  return is itself a Lever-3 handoff: columnar/minified.
-- **ultra only — image-rendered reads (PX).** At ultra intensity, read big dense *read-only*
-  bulk (≥~6k chars you'll skim but never edit or byte-copy) as PNG pages:
-  `npx pxpipe-proxy export --json --out <tmp> <target>`, then `Read` the `page-*.png` **and**
-  `factsheet.txt` (~5× cheaper; Fable-class readers only). Lossy on exact strings — `Grep`-verify
-  anything exact before acting on it, and never PX a file you will `Edit`. Guards: `honey-px`.
-
-Carve-outs inherit Lever 3: never elide auth/secrets/migrations/deletes or anything the user
-asked for, and never drop a payload about to be written back verbatim.
-
-## Loops — cost compounds per tick
-
-A `/loop` multiplies per-tick cost by tick count, so waste compounds. The levers
-above still apply each tick; loops add two leaks the single-shot levers don't cover
-— re-paying for context every wake-up, and re-doing work that didn't change:
-
-- **Pace to the prompt cache (5-min TTL).** Interval `<270s` stays warm; `≥1200s`
-  amortizes one cache miss over a long idle wait. **Never ~300s** — it pays the miss
-  without amortizing. Idle default **1200–1800s**.
-- **Don't poll harness-tracked work.** Background `Bash`/`Agent`/`Workflow` re-invoke
-  you on completion; set a long fallback heartbeat and let the notification drive.
-  Poll only external state the harness can't see (CI, deploy, remote queue).
-- **Short-circuit no-change ticks.** Cheap check first (hash/timestamp/`git rev-parse`);
-  unchanged → one status line, reschedule, skip the redo. Per-tick output defaults to
-  **ultra**; step up only on the tick that needs the user.
-- **Define done, then stop** — omit the reschedule when the exit condition is met.
-
-Full version: the `honey-loop` skill.
-
-## Examples
-
-Read a JSON file's key:
-> ```python
-> import json
-> def read_json_value(path, key):
->     return json.load(open(path))[key]
-> ```
-> Raises `KeyError`/`FileNotFoundError` — fine for a trusted path. `.get(key, default)` if optional.
-
-Stdlib already does it → no code:
-> `copy.deepcopy(d)` — no utility needed.
-
-Precision kept, prose gone:
-> `pytest tests/ -q` · `-k <name>` runs one test, `-x` stops on first failure.
+## 9. Pre-Finish Checklist & Formatting
+- **Formatting:** follow the language's doc conventions (PEP 257, JSDoc/TSDoc, rustdoc, Javadoc, godoc starting with the symbol name). Start doc comments with a one-line summary, since tooltips and generated docs show it alone. Write plain, warm, direct English, unless the repo's comments use another language.
+- **Before finishing:**
+  1. Find comments referencing changed symbols (scoped grep per §6) and ensure they remain true.
+  2. Verify ASCII diagrams and API contracts (errors, ownership, mutation) match the code.
+  3. Ensure zero Trivial/Backup comments, zero bare `TODO`s, and valid line-1 triggers on all `shortcut:`/`FIXME:` markers.
+  4. Run tests and state any unverified paths in 1 line.

@@ -1,8 +1,0 @@
-{
-  "id": "chunk",
-  "lang": "javascript",
-  "category": "algorithm",
-  "solution_file": "solution.js",
-  "test_file": "test.js",
-  "test_cmd": ["node", "test.js"]
-}

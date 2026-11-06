@@ -1,8 +1,0 @@
-{
-  "id": "csv-column-sum",
-  "lang": "python",
-  "category": "parsing",
-  "solution_file": "solution.py",
-  "test_file": "test.py",
-  "test_cmd": ["python3", "test.py"]
-}

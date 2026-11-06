@@ -1,4 +1,0 @@
-{"timestamp":"2026-01-02T12:00:00.000Z","type":"session_meta","payload":{"id":"s1","cwd":"/tmp","originator":"codex","cli_version":"0.0.0"}}
-{"timestamp":"2026-01-02T12:00:01.000Z","type":"turn_context","payload":{"turn_id":"t1","model":"gpt-5.5","cwd":"/tmp"}}
-{"timestamp":"2026-01-02T12:00:02.000Z","type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{}}}
-{"timestamp":"2026-01-02T12:00:03.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":600,"output_tokens":50,"reasoning_output_tokens":10,"total_tokens":1050},"last_token_usage":{"input_tokens":1000,"cached_input_tokens":600,"output_tokens":50,"reasoning_output_tokens":10,"total_tokens":1050},"model_context_window":null},"rate_limits":{}}}
