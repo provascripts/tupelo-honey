@@ -3,43 +3,53 @@
 
 Usage:
   craft-comment-sync.py [--check-diff] [--base REF]  audit code files changed since REF (default HEAD)
-  craft-comment-sync.py --hook                       PostToolUse: audit the Edit/Write/MultiEdit on stdin
+  craft-comment-sync.py --hook                       PostToolUse: the comments one Edit/Write/MultiEdit wrote
 
 Findings, one line each ("path:line: [KIND] detail"):
   [ORPHAN]  an identifier removed from the code is still named by a comment of
             the same file: a stale Function, Design, Teacher or Checklist
             comment. Distinctive names (snake_case, camelCase, digits,
             ALL_CAPS) match as whole words; plain words only as `name` or name(.
-  [BACKUP]  a new one-line comment is commented-out code.
+  [BACKUP]  a new comment is commented-out code. Inside a block of comment
+            lines it takes a majority of code-shaped lines, so prose with one
+            code-like line is never Backup.
   [TRIVIAL] a new one-line comment restates its code: >= 60% of its content
             words (at most 6) already appear in the code it describes. That is
-            the next line for a standalone comment heading <= 3 code lines,
-            the same line for a trailing comment.
+            the single statement under a standalone comment (a blank line, a
+            comment, a closing brace or a dedent ends its block), or the same
+            line for a trailing comment. A comment over two or more statements
+            titles a block: it is a Guide comment, never Trivial.
   [VAGUE]   a new one-line comment of <= 8 words made only of generic words
             ("Process the data", "Handle edge cases", "Update state if
             needed"): no domain term, symbol, number or causal connective.
             Numbered Guide comments (1:, 3a.) are exempt.
   [DIAGRAM-FIELD] [DIAGRAM-ORDER] [DIAGRAM-SIZE]
             a Teacher diagram drawn with [field:size] cells (see craftlib.py)
-            disagrees with the struct it documents: a cell names no field, two
-            fields appear out of declaration order, or a width differs from a
+            disagrees with the struct it documents: a cell names no field, a
+            field declared between two adjacent cells has no cell, two fields
+            appear out of declaration order, or a width differs from a
             fixed-width type or bitfield. Synthetic cells (header, hdr, pad,
             padding, payload) need no field; a sized header must equal the
-            fields it summarizes. Free-form diagrams without cells are never
-            checked.
+            fields it summarizes. A struct with members the parser cannot read
+            is checked for order and widths only. Free-form diagrams without
+            cells are never checked.
 
-Only lines written by the edit (--hook) or since REF (--check-diff) are judged
-for BACKUP, TRIVIAL and VAGUE, and a diagram only when the change touches it
-or its struct, so legacy comments never block new work. Exit codes:
-0 clean, 1 findings on stdout, 2 findings on stderr in --hook mode. Outside a
-git repository --check-diff has no baseline and exits 0. See the design notes
-in craftlib.py.
+--hook runs only BACKUP, TRIVIAL and VAGUE, on the lines the call wrote: an
+orphan, or a diagram that disagrees with its struct, may be the middle of a
+change spread over several edits, so those wait for the Stop gate
+(craft-gate.py), which runs every check here over what the session changed.
+--check-diff judges BACKUP, TRIVIAL and VAGUE only on lines changed since REF,
+and a diagram only when the change touches it or its struct, so legacy
+comments never block new work. Exit codes: 0 clean, 1 findings on stdout, 2
+findings on stderr in --hook mode. Outside a git repository --check-diff has
+no baseline and exits 0. See the design notes in craftlib.py.
 """
 
 import argparse
 import os
 import re
 import sys
+from collections import Counter
 
 import craftlib as cl
 
@@ -74,6 +84,8 @@ PROSE = re.compile(r"^[A-Z][a-z']*\s+\S+\s+\S+.*[.!?]$")
 VERBS = ((re.compile(r"\+\+|\+="), "increment add increase"),
          (re.compile(r"--|-="), "decrement subtract decrease"),
          (re.compile(r"(?<![=!<>+\-*/%&|^])=(?!=)"), "set assign store"))
+# A line that only closes a block ends the statements a comment describes.
+CLOSER = re.compile(r"^(?:[)\]}]+[;,]?|end|fi|done|esac)$")
 
 _C_CODE = [re.compile(p) for p in (
     r"^[\w.$>\-\[\]*&:!]+\s*\(.*\)\s*;$",                                 # call;
@@ -150,6 +162,25 @@ def backup(comment, family):
     return any(p.search(comment) for p in _C_CODE) or (family != "c" and bool(_C_CALL_NO_SEMI.match(comment)))
 
 
+def block_is_code(lines, no, family):
+    """Return True when most lines of the comment block holding line `no` read as code.
+
+    Why: commented-out code comes in uniform blocks, while a prose block may
+    hold one line shaped like an assignment ("ceiling = at least one digit").
+    The block is the run of comment-only lines of the same kind around `no`.
+    """
+    def same(i):
+        return 0 <= i < len(lines) and lines[i].comment is not None and not lines[i].code.strip() \
+            and lines[i].kind == lines[no - 1].kind
+    lo = hi = no - 1
+    while same(lo - 1):
+        lo -= 1
+    while same(hi + 1):
+        hi += 1
+    run = [lines[i].comment.strip() for i in range(lo, hi + 1) if lines[i].comment.strip()]
+    return sum(backup(c, family) for c in run) * 2 > len(run)
+
+
 def vague(comment):
     """Return True when a one-line comment of <= 8 words is made only of generic words."""
     if len(comment.split()) > 8 or STEP.match(comment) or SPECIFIC.search(comment) \
@@ -157,6 +188,31 @@ def vague(comment):
         return False
     said = words(comment)
     return bool(said) and said <= GENERIC
+
+
+def described_code(lines, no):
+    """Return the single statement a standalone comment at 1-based line `no` describes, or None.
+
+    None when the comment belongs to a multi-line comment block or heads two
+    or more statements: then it titles a block (a Guide comment) or teaches
+    (a Teacher comment) instead of restating one statement. The block ends at
+    a blank line, a comment, a line that only closes a block, or a line
+    indented less than the block's first line.
+    """
+    prev = lines[no - 2] if no >= 2 else None
+    if prev is not None and prev.comment is not None and not prev.code.strip():
+        return None
+    block, indent = [], None
+    for line in lines[no:]:
+        code = line.code.strip()
+        depth = len(line.raw) - len(line.raw.lstrip())
+        if not code or CLOSER.match(code) or (indent is not None and depth < indent):
+            break
+        indent = depth if indent is None else indent
+        block.append(line.code)
+        if len(block) > 1:
+            return None
+    return block[0] if block else None
 
 
 def cell_bits(size, bitfield):
@@ -175,37 +231,44 @@ def cell_bits(size, bitfield):
 
 
 def diagram_findings(lines, family, added, where):
-    """Check [field:size] cells against the struct they document; see the module docstring.
+    """Return (key, message) for [field:size] cells that disagree with their struct; see the module docstring.
 
     A struct is checked only when this change touched it or its diagram, it
     has parsed fields, and its diagram has at least two cells: a lone
-    "[note: see below]" in prose is not a layout.
+    "[note: see below]" in prose is not a layout. An inexact struct (see
+    craftlib.Struct) skips every check that needs its complete field list.
     """
     out = []
     for st in cl.structs(lines, family):
         window = cl.diagram_window(lines, st)
         touched = added & (set(range(st.line, st.last + 1)) | {no for no, _ in window})
-        cells = [(no, m.group("name"), m.group("size").strip()) for no, text in window for m in cl.CELL.finditer(text)]
+        cells = [(no, m.group("name"), m.group("size").strip(), m.start(), m.end(), text)
+                 for no, text in window for m in cl.CELL.finditer(text)]
         if not st.fields or not touched or len(cells) < 2:
             continue
-        index = {f.name.lower(): (i, f) for i, f in enumerate(st.fields)}
+        counts = Counter(f.name.lower() for f in st.fields)
+        index = {f.name.lower(): (i, f) for i, f in enumerate(st.fields) if counts[f.name.lower()] == 1}
         title = st.name or (st.aliases[0] if st.aliases else "struct")
+
+        def emit(no, kind, subject, text):
+            out.append(("sync|%s|%s|%s|%s" % (where, kind, title, subject), "%s:%d: [%s] %s" % (where, no, kind, text)))
 
         # Every real cell names a field and agrees with its width.
         named = []
-        for no, name, size in cells:
+        for no, name, size, _, _, _ in cells:
             if cl.SYNTHETIC.match(name):
                 continue
             hit = index.get(name.lower())
             if hit is None:
-                out.append("%s:%d: [DIAGRAM-FIELD] cell '%s' names no field of '%s' (fields: %s)"
-                           % (where, no, name, title, ", ".join(f.name for f in st.fields)))
+                if st.exact and name.lower() not in counts:
+                    emit(no, "DIAGRAM-FIELD", name, "cell '%s' names no field of '%s' (fields: %s)"
+                         % (name, title, ", ".join(f.name for f in st.fields)))
                 continue
             named.append((no, name, hit[0]))
             bits = cell_bits(size, hit[1].bitfield)
             if bits is not None and hit[1].bits is not None and bits != hit[1].bits:
-                out.append("%s:%d: [DIAGRAM-SIZE] cell '%s:%s' says %d bits, the code declares %d"
-                           % (where, no, name, size, bits, hit[1].bits))
+                emit(no, "DIAGRAM-SIZE", name, "cell '%s:%s' says %d bits, the code declares %d"
+                     % (name, size, bits, hit[1].bits))
 
         # Order: within each strip (a repeated field starts a new one) indices only grow.
         strip, prev = set(), None
@@ -213,21 +276,35 @@ def diagram_findings(lines, family, added, where):
             if idx in strip:
                 strip, prev = set(), None
             if prev is not None and idx < prev[2]:
-                out.append("%s:%d: [DIAGRAM-ORDER] cell '%s' comes after '%s' but '%s' declares it first"
-                           % (where, no, name, prev[1], title))
+                emit(no, "DIAGRAM-ORDER", name, "cell '%s' comes after '%s' but '%s' declares it first"
+                     % (name, prev[1], title))
             strip.add(idx)
             prev = (no, name, idx)
+        if not st.exact:
+            continue
+
+        # Gaps: two adjacent cells on one line, with nothing between them, name
+        # fields i < j; a field declared between them that no cell names is missing.
+        drawn = {name.lower() for _, name, _, _, _, _ in cells}
+        for a, b in zip(cells, cells[1:]):
+            first, second = index.get(a[1].lower()), index.get(b[1].lower())
+            if a[0] != b[0] or a[5][a[4]:b[3]].strip() or not first or not second or second[0] <= first[0] + 1:
+                continue
+            missing = [f.name for f in st.fields[first[0] + 1:second[0]] if f.name.lower() not in drawn]
+            if missing:
+                emit(a[0], "DIAGRAM-FIELD", ",".join(missing), "'%s' declares %s between '%s' and '%s', but no "
+                     "cell draws %s" % (title, ", ".join(missing), a[1], b[1], "them" if len(missing) > 1 else "it"))
 
         # A sized header covers exactly the leading fields that no cell names.
         named_idx = {idx for _, _, idx in named}
         covered = [f for i, f in enumerate(st.fields[:min(named_idx, default=len(st.fields))]) if i not in named_idx]
-        for no, name, size in cells:
+        for no, name, size, _, _, _ in cells:
             if not re.match(r"(?i)h(?:ea)?d(?:e)?r", name) or not covered or any(f.bits is None for f in covered):
                 continue
             bits, total = cell_bits(size, all(f.bitfield for f in covered)), sum(f.bits for f in covered)
             if bits is not None and bits != total:
-                out.append("%s:%d: [DIAGRAM-SIZE] cell '%s:%s' says %d bits, the fields it summarizes (%s) add up to %d"
-                           % (where, no, name, size, bits, ", ".join(f.name for f in covered), total))
+                emit(no, "DIAGRAM-SIZE", name, "cell '%s:%s' says %d bits, the fields it summarizes (%s) add up to %d"
+                     % (name, size, bits, ", ".join(f.name for f in covered), total))
     return out
 
 
@@ -247,50 +324,18 @@ def mentions(comment, name):
     return ("`%s`" % name) in comment or re.search(r"(?<![\w$.])%s\(" % re.escape(name), comment) is not None
 
 
-def described_code(lines, no):
-    """Return the code a standalone comment at 1-based line `no` describes, or None.
-
-    None when the comment belongs to a multi-line comment block or heads more
-    than 3 code lines: then it is a Guide or Teacher comment, not a restatement.
-    """
-    prev = lines[no - 2] if no >= 2 else None
-    if prev is not None and prev.comment is not None and not prev.code.strip():
-        return None
-    end = no
-    while end < len(lines) and lines[end].code.strip():
-        end += 1
-    if end == no or end - no > 3:
-        return None
-    return lines[no].code
-
-
 def clip(text, width=60):
     """Shorten `text` for a one-line report."""
     return text if len(text) <= width else text[:width - 3] + "..."
 
 
-def audit(path, family, text, added, removed):
-    """Return the findings for one file.
+def comment_findings(lines, family, added, where):
+    """Return (key, message) for BACKUP, TRIVIAL and VAGUE among the comment lines in `added`.
 
-    `added` holds the 1-based line numbers the change wrote; `removed` the
-    identifiers that were in the old code (those still in the code are
-    filtered here, so callers may pass the whole old identifier set).
+    These judge one comment against its own code, so they are safe after any
+    single edit (the PostToolUse level of craftlib's design notes).
     """
-    lines = cl.scan(text, family)
-    where = cl.shown(path)
     out = []
-
-    # ORPHAN: identifiers gone from the code but still named by any comment.
-    gone = sorted(s for s in removed - cl.code_identifiers(lines)
-                  if len(s.strip("_$")) >= 3 and s.lower() not in KEYWORDS)
-    if gone:
-        for no, line in enumerate(lines, 1):
-            for sym in gone:
-                if line.comment and mentions(line.comment, sym):
-                    out.append("%s:%d: [ORPHAN] '%s' is gone from the code but this comment still names it"
-                               % (where, no, sym))
-
-    # BACKUP, TRIVIAL and VAGUE: only one-line comments this change wrote.
     for no in sorted(added):
         if no > len(lines):
             continue
@@ -304,75 +349,60 @@ def audit(path, family, text, added, removed):
             continue
         if line.code.strip():
             target = line.code
-        elif line.kind != "doc" and backup(said, family):
-            out.append("%s:%d: [BACKUP] commented-out code, git is the backup: '%s'" % (where, no, clip(said)))
+        elif line.kind != "doc" and backup(said, family) and (not in_block or block_is_code(lines, no, family)):
+            out.append(("sync|%s|BACKUP|%s" % (where, said),
+                        "%s:%d: [BACKUP] commented-out code, git is the backup: '%s'" % (where, no, clip(said))))
             continue
         else:
             target = described_code(lines, no)
         # Why: a doc comment is a Function comment, never deletable as Trivial; it can only be Vague.
         ratio = trivial(said, target) if target and line.kind != "doc" else None
         if ratio:
-            out.append("%s:%d: [TRIVIAL] restates its code (%d%% word overlap), delete or say why: '%s'"
-                       % (where, no, round(ratio * 100), clip(said)))
+            out.append(("sync|%s|TRIVIAL|%s" % (where, said),
+                        "%s:%d: [TRIVIAL] restates its code (%d%% word overlap), delete or say why: '%s'"
+                        % (where, no, round(ratio * 100), clip(said))))
         elif (line.code.strip() or not in_block) and vague(said):
-            out.append("%s:%d: [VAGUE] says nothing the code does not: name the domain fact, limit or reason: '%s'"
-                       % (where, no, clip(said)))
+            out.append(("sync|%s|VAGUE|%s" % (where, said),
+                        "%s:%d: [VAGUE] says nothing the code does not: name the domain fact, limit or reason: '%s'"
+                        % (where, no, clip(said))))
+    return out
 
-    # Layout diagrams drawn with [field:size] cells, against their struct.
-    return out + diagram_findings(lines, family, added, where)
+
+def audit(where, family, text, added, removed):
+    """Return (key, message) for every check of this script on one file.
+
+    `added` holds the 1-based line numbers the change wrote; `removed` the
+    identifiers that were in the old code (those still in the code are
+    filtered here, so callers may pass the whole old identifier set). Keys
+    omit line numbers, which shift with every edit; see craft-gate.py.
+    """
+    lines = cl.scan(text, family)
+    out = []
+
+    # ORPHAN: identifiers gone from the code but still named by any comment.
+    gone = sorted(s for s in removed - cl.code_identifiers(lines)
+                  if len(s.strip("_$")) >= 3 and s.lower() not in KEYWORDS)
+    for no, line in enumerate(lines, 1):
+        for sym in gone if line.comment else ():
+            if mentions(line.comment, sym):
+                out.append(("sync|%s|ORPHAN|%s" % (where, sym),
+                            "%s:%d: [ORPHAN] '%s' is gone from the code but this comment still names it"
+                            % (where, no, sym)))
+    return out + comment_findings(lines, family, added, where) + diagram_findings(lines, family, added, where)
 
 
 def from_hook(data):
-    """Audit the file written by the Edit, MultiEdit or Write call described by hook payload `data`.
-
-    Why: judging only the text this call wrote (new_string, or the whole
-    content of a Write) keeps the hook stateless and silent about legacy
-    comments elsewhere in the file.
-    """
-    tool_input = data.get("tool_input") or {}
-    path = os.path.abspath(tool_input.get("file_path") or "")
-    family = cl.family_of(path)
-    text = cl.read_text(path) if family else None
-    if text is None:
+    """Return the report lines for BACKUP, TRIVIAL and VAGUE among the lines the call in `data` wrote."""
+    got = cl.edit_lines(data)
+    family = cl.family_of(got[0]) if got else None
+    if not family:
         return []
-    text = text.replace("\r\n", "\n")
-
-    edits = [] if "content" in tool_input else (tool_input.get("edits") or [tool_input])
-
-    # Lines this call wrote: all of them for a Write; each new_string's lines
-    # for Edit and MultiEdit (at most 50 occurrences per edit).
-    added = set(range(1, text.count("\n") + 2)) if not edits else set()
-    for edit in edits:
-        new = (edit.get("new_string") or "").replace("\r\n", "\n")
-        start, hits = (text.find(new), 0) if new.strip() else (-1, 0)
-        while start >= 0 and hits < 50:
-            first = text.count("\n", 0, start) + 1
-            added.update(range(first, first + new.count("\n") + 1))
-            start, hits = text.find(new, start + len(new)), hits + 1
-
-    # The file as it was before this call, lexed whole. Why: an old_string
-    # lexed on its own turns a piece of docstring or comment into "code" and
-    # every word in it into a false ORPHAN; in context it stays a comment.
-    response = data.get("tool_response")
-    old = response.get("originalFile") if isinstance(response, dict) else None
-    if not isinstance(old, str) and edits:
-        old = text
-        for edit in reversed(edits):
-            new = (edit.get("new_string") or "").replace("\r\n", "\n")
-            if not new or new not in old:
-                old = None
-                break
-            old = old.replace(new, (edit.get("old_string") or "").replace("\r\n", "\n"),
-                              -1 if edit.get("replace_all") else 1)
-    if not isinstance(old, str):
-        root = cl.repo_root(os.path.dirname(path))
-        old = (cl.git(["show", "HEAD:" + os.path.relpath(path, root).replace(os.sep, "/")], root) if root else "") \
-            or ""
-    return audit(path, family, text, added, cl.code_identifiers(cl.scan(old.replace("\r\n", "\n"), family)))
+    path, text, added = got
+    return [msg for _, msg in comment_findings(cl.scan(text, family), family, added, cl.shown(path))]
 
 
 def from_git(base):
-    """Audit every code file that changed since `base` or is untracked; [] outside git."""
+    """Return the report lines for every code file that changed since `base` or is untracked; [] outside git."""
     root = cl.repo_root(os.getcwd())
     if not root:
         return []
@@ -389,7 +419,18 @@ def from_git(base):
         else:
             added, old = cl.added_lines(root, base, rel), cl.baseline_text(root, base, rel)
         removed = cl.code_identifiers(cl.scan(old, family)) if old else set()
-        out += audit(path, family, text, added, removed)
+        out += [msg for _, msg in audit(cl.shown(path), family, text, added, removed)]
+    return out
+
+
+def gate_findings(root, changes):
+    """Stop gate: return (key, message) for every check of this script on the files `changes` lists."""
+    out = []
+    for ch in changes:
+        family = cl.family_of(ch.rel)
+        if family:
+            removed = cl.code_identifiers(cl.scan(ch.old, family)) if ch.old else set()
+            out += audit(ch.rel, family, ch.text, ch.added, removed)
     return out
 
 

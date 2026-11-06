@@ -1,10 +1,11 @@
 {
-  "description": "tupelo-honey zero-token gates: mode directive at session start, debt markers and comment sync after every edit, module metrics at Stop. Silent unless a rule is broken.",
+  "description": "tupelo-honey zero-token gates: mode directive and change snapshot at session start; debt markers, Backup, Trivial and Vague comments on the lines each edit wrote; every check plus orphans, layout diagrams and review signals at Stop, over everything the session changed. Silent unless a rule is broken.",
   "hooks": {
     "SessionStart": [
       {
         "hooks": [
-          { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/bin/craft-mode.sh\" session", "timeout": 10 }
+          { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/bin/craft-mode.sh\" session", "timeout": 10 },
+          { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/bin/craft-gate.py\" --snapshot", "timeout": 30 }
         ]
       }
     ],
@@ -12,7 +13,7 @@
       {
         "matcher": "Edit|Write|MultiEdit",
         "hooks": [
-          { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/bin/craft-debt-scan.sh\" --hook", "timeout": 30 },
+          { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/bin/craft-debt-scan.py\" --hook", "timeout": 30 },
           { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/bin/craft-comment-sync.py\" --hook", "timeout": 30 }
         ]
       }
@@ -20,7 +21,7 @@
     "Stop": [
       {
         "hooks": [
-          { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/bin/craft-metrics.py\" --gate", "timeout": 60 }
+          { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/bin/craft-gate.py\"", "timeout": 90 }
         ]
       }
     ]

@@ -5,7 +5,7 @@ Write less code, waste zero chat tokens, and craft source files with the comment
 ## 0. Scope, Precedence & Modes
 - **Scope:** any language. Examples are illustrative: translate them to the language's idiomatic comment/doc syntax.
 - **Priority order:** explicit user request > this file > `honey-for-devs` > repo conventions. Repo and language conventions win on *form* (doc syntax, style guide, file layout); this file governs *what knowledge* comments and docs must carry.
-- **Modes:** `/honey [lite|full|ultra|off]` switches the current session; `/honey default <mode>` persists the default (initially `full`) via `bin/craft-mode.sh`, re-injected at every session start; `/honey` alone returns to it.
+- **Modes:** `/tupelo [lite|full|ultra|off]` switches the current session (alias `/honey`; prefer `/tupelo` when the Honey plugin, which owns `/honey`, is installed too); `/tupelo default <mode>` persists the default (initially `full`) via `bin/craft-mode.sh`, re-injected at every session start; `/tupelo` alone returns to it.
   - `full`: terse chat (Lever 2); every code rule.
   - `lite`: chat may explain in full sentences; Lever 1 and all comment rules unchanged.
   - `ultra`: answer-only chat and loop reports; dense reading for large read-only files (§6); code comments unchanged.
@@ -23,7 +23,7 @@ Write less code, waste zero chat tokens, and craft source files with the comment
 - **Ladder first, then design:** needs to exist (YAGNI)? → existing code → stdlib → language native → installed dependency → one line → minimum deep module; stop at the first rung that works. For non-trivial additions (new data structure, module, service, public API change, > 100 lines or ≥ 3 distinct logical phases) list 2–3 candidate designs in chat, 1 line each, plus the chosen one and why (in `lite`), then **proceed immediately**. **Stop and wait for approval** only if the choice changes a public API, a data/storage/wire format, or is irreversible (migrations, deletions).
 - **Data dominates (Pike):** choose and freeze explicit data structures before procedural logic. Prefer length-prefixed, binary-safe layouts over formats that need stateful parsers (djb).
 - **Measured trade-offs only:** performance tricks (custom memory layouts, caches, manual pooling, concurrency, vectorization, native extensions, bit packing) need a benchmark, profiler output, memory measurement or explicit user constraint, recorded in the Why comment or commit message. Without evidence, use the simplest data structure.
-- **Deep modules (Ousterhout):** D_mod = implementation LOC / public functions ≥ 15 (LOC = non-blank, non-comment lines).
+- **Deep modules (Ousterhout):** D_mod = implementation LOC / public functions (LOC = non-blank, non-comment lines); below 15 is a review signal to look for shallow entry points to merge or hide, never a quota: the test is a lower cognitive load (ΔL_cog < 0).
 - **Cohesive functions, meaningful helpers:** keep sequential steps together when they share local state and form one transformation (e.g. `raxGenericInsert`), **provided** the function is segmented by Guide comments anchored to a Teacher comment. Extract helpers when they create a semantic boundary, isolate resource ownership, remove duplication or enable independent tests; a single-caller helper under 30 LOC without one of these benefits, named in a `Why:` comment, is inlined.
 - **Centralized cleanup:** a function acquiring ≥ 2 fallible resources or allocations tears down in one place: `goto cleanup`/`oom` in C, `defer`/`errdefer` in Go/Zig, `?`/`Drop` in Rust, `with`/`using`, `ExitStack` or a single `try/finally` in Python/TS/Java. Allocate everything a mutation needs before touching the structure, so a failure leaves it intact.
 - **Bulk is generated, never typed:** ≥ 5 similar fixtures, tables or cases → write and run a generator.
@@ -76,9 +76,16 @@ Write less code, waste zero chat tokens, and craft source files with the comment
    ```python
    # WARNING: If you add a state here, update STATE_LABELS in ui/labels.py as well.
    ```
-6. **Guide** — one short line before a logical block stating its goal (`// Free the query buffer.`, `// 1: Save next pointer.`). Mandatory in cohesive functions ≥ 40 LOC or with ≥ 3 distinct phases: one every 15–25 LOC; ≥ 80 LOC adds a numbered step map with matching step headers. Never "redundant narration".
+6. **Guide** — one short line titling the block of statements below it with their common goal, or a numbered step anchored to a Teacher comment (`// 1: Save next pointer.`):
+   ```c
+   /* Free the query buffer. */
+   sdsfree(c->querybuf);
+   sdsfree(c->pending_querybuf);
+   c->querybuf = NULL;
+   ```
+   The same line over a single statement it restates is Trivial (7). Expected in cohesive functions ≥ 40 LOC or with ≥ 3 distinct phases, about one every 15–25 LOC where a block has a goal the code does not show (a flat `switch` or table needs none); ≥ 80 LOC adds a numbered step map with matching step headers. Never "redundant narration".
 ### Negative kinds (avoid or control)
-7. **Trivial** — reading cost ≥ the code itself (`count += 1  # Increment count.`). Delete on sight; if 1–3 lines are unclear, rename instead. Only Trivial and Backup comments count as "redundant".
+7. **Trivial** — a Guide comment whose reading cost ≥ the code it covers (antirez): one statement restated (`count += 1  # Increment count.`). Delete on sight; if 1–3 lines are unclear, rename instead. Only Trivial and Backup comments count as "redundant".
 8. **Debt** — `shortcut:` and `FIXME:` only, never a bare `TODO`; ceiling and trigger on line 1:
    ```python
    # shortcut: O(N) scan, fine under ~10k entries; add an index past that.
@@ -86,27 +93,28 @@ Write less code, waste zero chat tokens, and craft source files with the comment
    ```go
    // FIXME: empty keys not handled; callers must reject them until fixed.
    ```
-   Markers count only in comments starting with `#`, `//`, `--` or `/*` (`craft-debt-scan.sh`, `honey-debt`); audit other syntaxes with `grep`. Never invent issue IDs; delete resolved markers in the same diff.
+   A marker counts only where it opens a real comment: `craft-debt-scan.sh` reads comments through the shared lexer, never string literals, in every language of §7, and other text files (YAML, TOML, HTML...) by a line match on `#`, `//`, `--`, `/*`, `<!--`. Never invent issue IDs; delete resolved markers in the same diff.
 9. **Backup** — commented-out code or debug prints: forbidden, git is the backup. Debug logging behind a flag, log level or compile-time switch is code, not backup: keep it.
 
 ## 6. Comment Maintenance & Context Hygiene
 - **Preserve** every comment that remains true. Never shorten, reword or compress valid comments to save tokens.
 - **Update in the same diff** every comment your edit falsifies, including **outside the edited hunk**: doc comments at the definition *and* at every declaration (header, interface, `.pyi`/`.d.ts`, public docs), the Design comment, coupled Checklist comments, `shortcut:` triggers. Find them with `grep -rnw <symbol>`; for generic names (`get`, `close`, `parse`, `run`, `index`) grep the qualified form (`Index.close`, `index_close`) scoped to the module's directory, `grep -l` first. LSP "find references" does not search comments: it never replaces the grep. **Delete** comments that have become false.
-- **Locate before reading:** Grep/Glob declarations first, then Read with offset/limit; headers, Design and Function comments before bodies. `ultra`: read-only files ≥ 6000 chars via dense reading (`honey-px` if installed), never a file you will Edit.
+- **Locate before reading:** Grep/Glob declarations first, then Read with offset/limit; headers, Design and Function comments before bodies. `ultra`: read-only files ≥ 6000 chars via dense reading (`honey-px` if installed), never a file you will Edit or quote exactly: image reads are lossy on exact strings.
 - **Aggregate in code:** counts, sorts, dedups, diffs and line measurements come from a command or script, never from reasoning.
-- **Agent-to-agent only (Lever 3):** subagent results are minified JSON (columnar when uniform; ESON only when asked), records keyed by stable `id` (never position), with an `n` count checksum verified before use. Never show these payloads to the user: render them.
+- **Big outputs:** a command that may print > 100 lines writes to a file; read its line count, head, tail and `grep` hits, never the whole output (Honey's `honey-ccr` automates this, if installed).
+- **Agent-to-agent only (Lever 3):** subagent results are minified JSON, columnar when uniform (`{"c":[...],"r":[[...]],"n":N}`; ESON only when asked), records keyed by stable `id` (never position), with an `n` count checksum verified before use. Never show these payloads to the user: render them.
 
 ## 7. Plugin Skills, Agents & Hooks
 - Load on match: `craft-design` (new module, data structure, header, format, trade-off) · `craft-code` (implementation, refactoring, error cleanup, `*Show` dumpers) · `craft-review` (diff review, delete-list, comment sync, debt) · `craft-verify` (tests, differential fuzzing, fault injection).
 - Subagents: `hive-craft-scout` maps modules and invariants; `hive-craft-reviewer` audits a diff. Both return Lever 3 JSON.
-- Zero-token hooks print only on violations; fix what they report before finishing. After Edit/Write: `craft-debt-scan.sh` (markers) and `craft-comment-sync.py` (orphaned symbols, Backup, Trivial, Vague, `[field:size]` diagrams vs their struct). At Stop: `craft-metrics.py --gate` (D_mod, single-caller helpers, Guide rhythm, missing Function/Design/Teacher comments, layouts without a size/offset assertion). Beyond names, order and widths the scripts check presence, never quality: what a comment says is still yours to get right.
+- Zero-token hooks print only on violations. After each Edit/Write, on the lines it wrote: debt markers, Backup, Trivial, Vague (`craft-debt-scan.sh`, `craft-comment-sync.py`). At Stop, on every file the session changed, Bash edits included (`craft-gate.py`): those checks plus orphaned symbols and `[field:size]` diagrams vs their struct are **hard**, fix them (each blocks at most 3 Stops); the `craft-metrics.py` **review signals** (D_mod, single-caller helpers, Guide rhythm, missing Function/Design/Teacher comments, layouts without a size/offset assertion) are shown once: act where one reveals a real problem, judged by §1, never to move a number. Beyond names, order and widths the scripts check presence, never quality: what a comment says is still yours to get right.
 - Languages: comment checks cover C/C++/Objective-C/CUDA, Java, C#, Kotlin, Swift, Scala, Groovy, Dart, Solidity, PHP, Go, Rust, Zig, JS/TS, Python, shell, Ruby, Perl, R, Elixir, Crystal, Julia, Nim, PowerShell, Lua, SQL, Haskell, Lisps, OCaml, F#, Erlang, Fortran, VB; function metrics all but SQL, Haskell, Erlang, Fortran, VB, Tcl. Other files are skipped, never guessed.
 
 ## 8. This Repository (`tupelo-honey` plugin)
 - Layout: only `plugin.json` inside `.claude-plugin/`; `skills/ agents/ commands/ hooks/ bin/` at the root; kebab-case names; paths via `${CLAUDE_PLUGIN_ROOT}`. `bin/` holds runtime scripts (on the Bash PATH while the plugin is enabled), `scripts/` maintenance tools; shared lexer and design notes in `bin/craftlib.py`.
 - Stack: Bash + Python 3.8+ stdlib only; Markdown skills and agents with YAML frontmatter.
-- Test: `python3 tests/test-bin.py` (from Git Bash on Windows). Validate: `claude plugin validate .`
-- Generated mirrors, never edited by hand: `.cursor/rules/systems-craft.mdc` (from this file) and `.agents/skills/` (from `skills/`). After editing either source run `bash scripts/sync-mirrors.sh`; the tests fail on drift.
+- Test: `python3 tests/test-bin.py` (from Git Bash on Windows). Validate: `claude plugin validate .` Polyglot parser fixtures live in `tests/fixtures/`: each stays clean under every scanner, and the tests derive the faulty variants.
+- Generated mirrors, never edited by hand: `.cursor/rules/systems-craft.mdc` (from this file), `.agents/skills/` (from `skills/`) and `commands/honey.md` (from `commands/tupelo.md`). After editing a source run `bash scripts/sync-mirrors.sh`; the tests fail on drift.
 
 ## 9. Pre-Finish Checklist & Formatting
 - **Formatting:** follow the language's doc conventions (PEP 257, JSDoc/TSDoc, rustdoc, Javadoc, godoc starting with the symbol name). Start doc comments with a one-line summary, since tooltips and generated docs show it alone. Write plain, warm, direct English, unless the repo's comments use another language.

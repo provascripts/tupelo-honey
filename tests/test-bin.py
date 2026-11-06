@@ -34,9 +34,11 @@ import craftlib as cl  # noqa: E402
 SEED = int(os.environ.get("CRAFT_SEED") or random.SystemRandom().randrange(1 << 30))
 BASH = os.environ.get("CRAFT_BASH") or shutil.which("bash")
 ENV = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
-# Why: written literally, these markers would make craft-debt-scan.sh flag
-# this very file when it scans the repository, so the fixtures assemble them.
+# Why: craft-debt-scan reads comments only since v0.0.2, but grep-based
+# scanners (and any older installed copy of this plugin) would still count
+# markers written literally in this file, so the fixtures assemble them.
 TODO, FIXME, SHORTCUT, HONEY = "TO" + "DO", "FIX" + "ME", "short" + "cut:", "hon" + "ey:"
+FIXTURES = os.path.join(ROOT, "tests", "fixtures")
 
 
 def load_script(name):
@@ -49,6 +51,7 @@ def load_script(name):
 
 metrics = load_script("craft-metrics")
 sync = load_script("craft-comment-sync")
+gatekeeper = load_script("craft-gate")
 
 
 def run(args, cwd=None, stdin=None):
@@ -125,12 +128,26 @@ class Repo:
             shutil.rmtree(self.path, onerror=retry)
 
 
+# Per extension, for the generated marker files: the line comment opener, the
+# block comment delimiters (None when the language has none) and the quote of
+# a string literal, which must hide every marker written inside it.
+DEBT_SYNTAX = {".py": ("#", None, '"'), ".c": ("//", ("/*", "*/"), '"'), ".sh": ("#", None, '"'),
+               ".lua": ("--", ("--[[", "]]"), '"'), ".sql": ("--", ("/*", "*/"), "'"),
+               ".lisp": (";", ("#|", "|#"), '"'), ".erl": ("%", None, '"'), ".hs": ("--", ("{-", "-}"), '"'),
+               ".rs": ("//", ("/*", "*/"), '"')}
+
+
 class DebtScanTest(unittest.TestCase):
     def setUp(self):
         self.repo = Repo(git=False)
 
     def tearDown(self):
         self.repo.close()
+
+    @staticmethod
+    def found(out):
+        """Return sorted (kind, file, line) triples from "./file:line: [KIND] ..." report lines."""
+        return sorted((kind, name, no) for name, no, kind in re.findall(r"^\./(\S+?):(\d+): \[([A-Z-]+)\]", out, re.M))
 
     def test_ledger_and_violations(self):
         self.repo.write("ok.py", f"""
@@ -142,17 +159,18 @@ class DebtScanTest(unittest.TestCase):
             // {TODO}: optimize
             /* {SHORTCUT} global lock; split it later */
             // {SHORTCUT} linear scan under 500 items
-                * {FIXME} broken
+            /*
+             * {FIXME} broken
+             */
             // {HONEY} O(n^2) under 1k items; switch to a hash if n > 5000
             int {TODO}S = 1; // {TODO}LIST stays a word
             """)
         self.repo.write("notes.md", f"# {TODO} prose is never scanned\n")
         code, out, _ = debt(cwd=self.repo.path)
         self.assertEqual(code, 1, out)
-        found = sorted(re.findall(r"^\[([A-Z-]+)\] \./(\S+?):(\d+):", out, re.M))
-        self.assertEqual(found, sorted([
+        self.assertEqual(self.found(out), sorted([
             ("TODO", "bad.c", "1"), ("NO-CEILING", "bad.c", "2"), ("NO-TRIGGER", "bad.c", "3"),
-            ("NO-TRIGGER", "bad.c", "4"), ("TRACKED", "bad.c", "5"), ("TRACKED", "ok.py", "1"),
+            ("NO-TRIGGER", "bad.c", "5"), ("TRACKED", "bad.c", "7"), ("TRACKED", "ok.py", "1"),
             ("TRACKED", "ok.py", "2")]))
         self.assertIn("4 violation(s), 3 tracked marker(s)", out)
 
@@ -160,42 +178,59 @@ class DebtScanTest(unittest.TestCase):
         self.repo.write("ok.py", f"# {SHORTCUT} fixed 4 KiB buffer; grow it if a frame exceeds 4096 bytes\n")
         self.assertEqual(debt("--quiet", cwd=self.repo.path), (0, "", ""))
 
-    def test_hook_reports_only_lines_changed_since_head(self):
-        repo = Repo()
-        try:
-            path = repo.write("a.c", f"// {TODO}: legacy marker, not this edit's business\nint a;\n")
-            repo.commit()
-            with open(path, "a", encoding="utf-8", newline="\n") as fh:
-                fh.write(f"// {FIXME} breaks things\nint b;\n")
-            code, out, err = debt("--hook", stdin=edit_payload(path, old_string="", new_string="x"))
-            self.assertEqual((code, out), (2, ""), err)
-            self.assertRegex(err, r"\[NO-TRIGGER\] \S*a\.c:3:")
-            self.assertNotRegex(err, r"a\.c:1:")
-        finally:
-            repo.close()
+    def test_markers_in_literals_are_never_debt(self):
+        # Regression (v0.0.1): the grep-based scanner reported every one of these
+        # literals as a violation; only the comments may count.
+        self.repo.write("lit.py", f'''
+            message = "literal text # {TODO}: keep this string unchanged"
+            banner = """multi-line
+             # {FIXME} inside a triple-quoted literal
+            """
+            raw = r"C:\\path # {TODO}: raw"
+            x = 1  # {TODO}: the real one
+            ''')
+        self.repo.write("lit.js", f'''
+            const a = "text // {FIXME} broken";
+            const b = `line
+            // {FIXME} in a template`;
+            const c = "x /* {SHORTCUT} no ceiling */"; const r = /a \\/\\/ {TODO}/g;
+            /* a */ go(); // {FIXME} the second comment of this line
+            ''')
+        self.repo.write("lit.rs", f'let s = r#"x // {TODO}"#;\nlet t = "x"; // {TODO}: real\n')
+        self.repo.write("lit.go", f'var s = `x // {TODO}`\n// {TODO}: real\n')
+        code, out, _ = debt("--quiet", cwd=self.repo.path)
+        self.assertEqual(self.found(out), sorted([("TODO", "lit.py", "6"), ("NO-TRIGGER", "lit.js", "5"),
+                                                  ("TODO", "lit.rs", "2"), ("TODO", "lit.go", "2")]))
+        self.assertEqual(code, 1)
 
-    def test_hook_scans_untracked_files_whole(self):
-        path = self.repo.write("new.c", f"int x;\n// {TODO}: later\n")
-        code, _, err = debt("--hook", stdin=edit_payload(path, old_string="", new_string="int x;"))
+    def test_hook_judges_only_the_lines_this_edit_wrote(self):
+        path = self.repo.write("a.c", f"// {TODO}: legacy marker, not this edit's business\nint a;\n"
+                                      f"// {FIXME} breaks things\nint b;\n")
+        code, out, err = debt("--hook", stdin=edit_payload(path, old_string="int b;",
+                                                           new_string=f"// {FIXME} breaks things\nint b;"))
+        self.assertEqual((code, out), (2, ""), err)
+        self.assertRegex(err, r"a\.c:3: \[NO-TRIGGER\]")
+        self.assertNotIn("a.c:1:", err)
+        # A Write wrote every line of the file.
+        write = json.dumps({"tool_name": "Write", "tool_input": {"file_path": path, "content": "x"}})
+        code, _, err = debt("--hook", stdin=write)
         self.assertEqual(code, 2)
-        self.assertRegex(err, r"\[TODO\] \S*new\.c:2:")
+        self.assertRegex(err, r"a\.c:1: \[TODO\]")
 
     def test_comment_openers_follow_the_language(self):
         for name, text in {"a.lisp": f"; {TODO}: lisp", "a.erl": f"% {FIXME} broken", "a.f90": f"! {TODO} fortran",
                            "a.vb": f"' {TODO} vb\nREM {FIXME} oops", "a.hs": f"-- {TODO} hs\n{{- {FIXME} nope -}}",
                            "a.ml": f"(* {TODO} ocaml *)", "a.html": f"<!-- {TODO} html -->", "a.lua": f"-- {TODO} lua",
-                           "b.py": f"x = '%s' % {TODO}\ny = 1 ; {TODO}", "b.c": f"int x = a ! {TODO};\nfor (;;) ; {TODO}"
-                           }.items():
+                           "b.py": f"x = '%s' % {TODO}\ny = 1 ; {TODO}", "b.c": f"int x = a ! {TODO};\nfor (;;) ; {TODO}",
+                           "c.lisp": f";; {TODO} doubled opener", "c.erl": f"%% {FIXME} doubled opener",
+                           "c.py": f"## {TODO} banner", "c.yml": f"key: 1  # {TODO} no lexer: line match"}.items():
             self.repo.write(name, text + "\n")
         code, out, _ = debt("--quiet", cwd=self.repo.path)
-        found = sorted(re.findall(r"^\[[A-Z-]+\] \./(\S+?):(\d+):", out, re.M))
+        found = sorted(re.findall(r"^\./(\S+?):(\d+): \[[A-Z-]+\]", out, re.M))
         self.assertEqual(found, [("a.erl", "1"), ("a.f90", "1"), ("a.hs", "1"), ("a.hs", "2"), ("a.html", "1"),
-                                 ("a.lisp", "1"), ("a.lua", "1"), ("a.ml", "1"), ("a.vb", "1"), ("a.vb", "2")])
+                                 ("a.lisp", "1"), ("a.lua", "1"), ("a.ml", "1"), ("a.vb", "1"), ("a.vb", "2"),
+                                 ("c.erl", "1"), ("c.lisp", "1"), ("c.py", "1"), ("c.yml", "1")])
         self.assertEqual(code, 1)
-
-    def test_hook_skips_the_scanner_itself(self):
-        path = self.repo.write("craft-debt-scan.sh", f"#   {SHORTCUT} <quantified ceiling>; <revisit trigger>\n")
-        self.assertEqual(debt("--hook", stdin=edit_payload(path, old_string="", new_string="x")), (0, "", ""))
 
     def test_hook_ignores_prose_missing_files_and_empty_input(self):
         path = self.repo.write("notes.md", f"# {TODO}\n")
@@ -209,23 +244,35 @@ class DebtScanTest(unittest.TestCase):
         triggers = ["; switch", "if it grows", "when it grows", "once it grows", "unless sorted", "until sorted",
                     "after the port", "upon reload", "over budget", "above budget", "past budget",
                     "exceeds budget", "beyond budget", "n > limit"]
-        lines, expected = [], set()
-        for no in range(1, 301):
-            kind = rng.choice(["shortcut", "honey", "fixme", "todo", "plain"])
-            ceiling, trigger = rng.random() < 0.5, rng.random() < 0.5
-            text = " ".join(rng.choice(words) for _ in range(rng.randint(1, 4)))
-            text += (" under %d items" % rng.randint(1, 99999)) if ceiling else ""
-            text += (" " + rng.choice(triggers)) if trigger else ""
-            prefix = rng.choice(["#", "//", "--", "/*", " *"])
-            lead = "x = 1  " if prefix != " *" and rng.random() < 0.3 else ""
-            marker = {"shortcut": SHORTCUT, "honey": HONEY, "fixme": FIXME + ":", "todo": TODO + ":", "plain": ""}[kind]
-            lines.append("%s%s %s %s" % (lead, prefix, marker, text))
-            if (kind == "todo" or (kind == "fixme" and not trigger)
-                    or (kind in ("shortcut", "honey") and not (ceiling and trigger))):
-                expected.add(no)
-        self.repo.write("gen.c", "\n".join(lines) + "\n")
+        expected = set()
+        for ext, (line_c, block, quote) in DEBT_SYNTAX.items():
+            lines = []
+            for no in range(1, 121):
+                kind = rng.choice(["shortcut", "honey", "fixme", "todo", "plain"])
+                ceiling, trigger = rng.random() < 0.5, rng.random() < 0.5
+                text = " ".join(rng.choice(words) for _ in range(rng.randint(1, 4)))
+                text += (" under %d items" % rng.randint(1, 99999)) if ceiling else ""
+                text += (" " + rng.choice(triggers)) if trigger else ""
+                marker = {"shortcut": SHORTCUT, "honey": HONEY, "fixme": FIXME + ":", "todo": TODO + ":",
+                          "plain": ""}[kind]
+                body = ("%s %s" % (marker, text)).strip()
+
+                # A marker counts only where it opens a comment: never inside a
+                # string literal, never in the middle of a comment.
+                form = rng.choice(["line", "trailing", "block", "string", "middle"])
+                form = "line" if form == "block" and not block else form
+                lines.append({"line": "%s %s" % (line_c, body),
+                              "trailing": "x = 1  %s %s" % (line_c, body),
+                              "block": "%s %s %s" % (block[0], body, block[1]) if block else "",
+                              "string": "s = %s%s %s%s" % (quote, line_c, body, quote),
+                              "middle": "%s note: %s" % (line_c, body)}[form])
+                bad = kind == "todo" or (kind == "fixme" and not trigger) \
+                    or (kind in ("shortcut", "honey") and not (ceiling and trigger))
+                if bad and form in ("line", "trailing", "block"):
+                    expected.add(("gen" + ext, str(no)))
+            self.repo.write("gen" + ext, "\n".join(lines) + "\n")
         code, out, _ = debt("--quiet", cwd=self.repo.path)
-        found = {int(n) for n in re.findall(r"^\[[A-Z-]+\] \./gen\.c:(\d+):", out, re.M)}
+        found = set(re.findall(r"^\./(gen\.\w+):(\d+): \[[A-Z-]+\]", out, re.M))
         self.assertEqual(found, expected, "seed %d" % SEED)
         self.assertEqual(code, 1 if expected else 0)
 
@@ -358,6 +405,8 @@ DIAGRAM_FIXTURES = {
     "sds_renamed.c": (SDS % "[len:1B][free:1B][flags:1B][buf: len bytes]", [(2, "DIAGRAM-FIELD")]),
     "sds_swapped.c": (SDS % "[alloc:1B][len:1B][flags:1B][buf: len bytes]", [(2, "DIAGRAM-ORDER")]),
     "sds_resized.c": (SDS % "[len:4B][alloc:1B][flags:1B][buf: len bytes]", [(2, "DIAGRAM-SIZE")]),
+    "sds_gap.c": (SDS.replace("    uint8_t alloc;\n", "    uint8_t alloc;\n    uint8_t extra;\n")
+                  % "[len:1B][alloc:1B][flags:1B][buf: len bytes]", [(2, "DIAGRAM-FIELD")]),
     "sds_strips.c": (SDS.replace(" *   %s\n", " *   [len:1B][alloc:1B]\n *   [len:1B][alloc:1B][flags:1B]\n"), []),
     "rax_ok.c": (RAX % 29, []),
     "rax_bad.c": (RAX % 28, [(6, "DIAGRAM-SIZE")]),
@@ -392,6 +441,39 @@ LAYOUT_FIXTURES = {
     "hdr_ok.py": 'class Pkt(ctypes.Structure):\n    _fields_ = [("len", ctypes.c_uint8)]\n\n\n'
                  'assert ctypes.sizeof(Pkt) == 1\n',
 }
+# The finding each mutation of a tests/fixtures file must produce (swap the
+# first two named cells of its first strip, rename the first one, grow the
+# first one's size): exact structs catch all three; an inexact one (a macro
+# field, an #ifdef) cannot tell a renamed cell from a field it did not read;
+# languages without a memory layout are never checked.
+_ALL = ("DIAGRAM-ORDER", "DIAGRAM-FIELD", "DIAGRAM-SIZE")
+FIXTURE_MUTATIONS = {
+    "c-packed-bitfields.c": _ALL, "c-macros-ifdef.c": ("DIAGRAM-ORDER", None, "DIAGRAM-SIZE"),
+    "cpp-members.cpp": _ALL, "csharp-layout.cs": _ALL, "rust-repr-lifetimes.rs": _ALL, "go-struct-tags.go": _ALL,
+    "zig-packed.zig": _ALL, "python-ctypes.py": _ALL, "python-dataclass.py": (None, None, None),
+    "typescript-interface.ts": (None, None, None), "literals.py": (None, None, None),
+}
+
+
+def mutate_strip(text, how):
+    """Return `text` with its first strip of >= 2 named cells mutated, or None when it has none."""
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        cells = [m for m in cl.CELL.finditer(line) if not cl.SYNTHETIC.match(m.group("name"))]
+        if len(cells) >= 2:
+            break
+    else:
+        return None
+    a, b = cells[0], cells[1]
+    if how == "swap":
+        line = line[:a.start()] + b.group() + line[a.end():b.start()] + a.group() + line[b.end():]
+    elif how == "rename":
+        line = line[:a.start("name")] + "ghost" + line[a.end("name"):]
+    else:
+        num = re.match(r"\d+", a.group("size").strip()).group()
+        line = line[:a.start("size")] + a.group("size").replace(num, str(int(num) + 1), 1) + line[a.end("size"):]
+    lines[i] = line
+    return "\n".join(lines)
 
 
 class CommentSyncTest(unittest.TestCase):
@@ -431,21 +513,24 @@ class CommentSyncTest(unittest.TestCase):
         self.repo.write("m.c", legacy)
         self.repo.commit()
         self.repo.write("m.c", legacy + """
-            int other(int count, int *node) {
+            int other(int count, int *node, struct client *c) {
                 // free(node);
 
                 // increment count
                 count++;
+
                 count++; /* increment count */
                 /* 1: Save next pointer. */
                 int next = node[1];
                 // Why: count before free, the callback reads it.
                 count++;
                 // Free the query buffer.
-                free(node);
-                node = 0;
-                count = 0;
-                next = 0;
+                free(c->query_buf);
+                free(c->pending_query_buf);
+                c->query_buf = NULL;
+
+                // Free the query buffer.
+                free(c->query_buf);
                 /* Return 0 on OOM. */
                 return 0;
             }
@@ -454,8 +539,28 @@ class CommentSyncTest(unittest.TestCase):
         self.assertEqual(code, 1, out)
         # Lines 1-4 are the committed legacy code (its "// count++;" is not this
         # change's business), line 5 is blank, the new function starts at 6.
+        # Regression (v0.0.1): line 17 titles three statements, a Guide comment,
+        # but was compared with its first statement alone and reported Trivial;
+        # the same words over the single statement at line 23 are Trivial.
         self.assertEqual(re.findall(r"^m\.c:(\d+): \[([A-Z]+)\]", out, re.M),
-                         [("7", "BACKUP"), ("9", "TRIVIAL"), ("11", "TRIVIAL")])
+                         [("7", "BACKUP"), ("9", "TRIVIAL"), ("12", "TRIVIAL"), ("22", "TRIVIAL")])
+
+    def test_backup_needs_a_code_majority_in_a_block(self):
+        self.repo.write("b.py", '''
+            # Markers carry their exit condition:
+            # ceiling = at least one digit
+            # trigger = a semicolon or one of the trigger words
+            # so the ledger can say when to revisit them.
+            X = 1
+
+            # old implementation:
+            # total = compute(x)
+            # emit(total)
+            Y = 2
+            ''')
+        code, out, _ = self.check_diff()
+        self.assertEqual(re.findall(r"^b\.py:(\d+): \[([A-Z]+)\]", out, re.M), [("8", "BACKUP"), ("9", "BACKUP")])
+        self.assertEqual(code, 1)
 
     def test_python_docstring_orphan_and_backup(self):
         self.repo.write("tool.py", '''
@@ -482,47 +587,29 @@ class CommentSyncTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(re.findall(r"^tool\.py:(\d+): \[([A-Z]+)\]", out, re.M), [("6", "ORPHAN"), ("7", "BACKUP")])
 
-    def test_hook_audits_the_edit_without_git(self):
-        plain = Repo(git=False)
-        try:
-            path = plain.write("codec.c", """
-                /* parse_header() reads the 5-byte frame header. */
-                int read_header(int x) { return x; }
-                // free(buf);
-                """)
-            data = edit_payload(path, old_string="int parse_header(int x) { return x; }",
-                                new_string="int read_header(int x) { return x; }\n// free(buf);")
-            code, out, err = script("craft-comment-sync.py", "--hook", stdin=data)
-            self.assertEqual((code, out), (2, ""), err)
-            self.assertIn("[ORPHAN] 'parse_header'", err)
-            self.assertIn("[BACKUP] commented-out code", err)
-        finally:
-            plain.close()
-
-    def test_hook_lexes_the_old_side_in_context(self):
-        # Regression: an old_string cut from a docstring was lexed as code and
-        # every ALL_CAPS word in it became a false ORPHAN.
-        plain = Repo(git=False)
-        try:
-            path = plain.write("doc.py", '"""Findings:\n  [BACKUP] commented-out code.\n"""\nX = 1\n')
-            data = edit_payload(path, old_string="  [BACKUP] commented-out code.\n  [TRIVIAL] restates.",
-                                new_string="  [BACKUP] commented-out code.")
-            self.assertEqual(script("craft-comment-sync.py", "--hook", stdin=data), (0, "", ""))
-        finally:
-            plain.close()
-
-    def test_hook_uses_original_file_for_deletions(self):
-        plain = Repo(git=False)
-        try:
-            path = plain.write("lib.py", "# old_parse() is kept for the CLI.\nX = 1\n")
-            data = json.loads(edit_payload(path, old_string="def old_parse():\n    return 1\n", new_string=""))
-            data["tool_response"] = {"originalFile": "# old_parse() is kept for the CLI.\nX = 1\n"
-                                                     "def old_parse():\n    return 1\n"}
-            code, _, err = script("craft-comment-sync.py", "--hook", stdin=json.dumps(data))
-            self.assertEqual(code, 2, err)
-            self.assertIn("lib.py:1: [ORPHAN] 'old_parse'", err)
-        finally:
-            plain.close()
+    def test_hook_leaves_cross_edit_checks_to_stop(self):
+        # A rename half-way through: the comment still names parse_header and the
+        # diagram still names len. Those may be the next edits of the same change,
+        # so PostToolUse reports only what this edit decided alone (the Backup).
+        path = self.repo.write("codec.c", """
+            /* parse_header() reads the 5-byte frame header. */
+            int read_header(int x) { return x; }
+            // free(buf);
+            /* [len:1B][kind:1B] */
+            struct frame {
+                uint8_t size;
+                uint8_t kind;
+            };
+            """)
+        data = edit_payload(path, edits=[
+            {"old_string": "int parse_header(int x) { return x; }",
+             "new_string": "int read_header(int x) { return x; }\n// free(buf);"},
+            {"old_string": "    uint8_t len;", "new_string": "    uint8_t size;"}])
+        code, out, err = script("craft-comment-sync.py", "--hook", stdin=data)
+        self.assertEqual((code, out), (2, ""), err)
+        self.assertIn("codec.c:3: [BACKUP] commented-out code", err)
+        self.assertNotIn("ORPHAN", err)
+        self.assertNotIn("DIAGRAM", err)
 
     def test_vague_comments(self):
         self.repo.write("v.c", """
@@ -562,20 +649,39 @@ class CommentSyncTest(unittest.TestCase):
         for trial in range(80):
             fields = [("f%d_%d" % (trial, i),) + rng.choice(types) for i in range(rng.randint(2, 6))]
             cells = ["[%s:%dB]" % (fname, bits // 8) for fname, _, bits in fields]
-            mutation, i = rng.choice(["none", "rename", "swap", "resize"]), rng.randrange(len(fields) - 1)
+            mutation, i = rng.choice(["none", "rename", "swap", "resize", "insert"]), rng.randrange(len(fields) - 1)
             if mutation == "rename":
                 cells[i] = "[ghost%d:%s" % (i, cells[i].split(":", 1)[1])
             elif mutation == "swap":
                 cells[i], cells[i + 1] = cells[i + 1], cells[i]
             elif mutation == "resize":
                 cells[i] = "[%s:%dB]" % (fields[i][0], fields[i][2] // 4)
+            elif mutation == "insert":
+                fields.insert(i + 1, ("added%d_%d" % (trial, i), "uint8_t", 8))
             text = "/* Layout:\n *   %s\n */\nstruct s%d {\n%s};\n" % (
                 "".join(cells), trial, "".join("    %s %s;\n" % (t, fname) for fname, t, _ in fields))
-            found = {re.search(r": \[([A-Z-]+)\]", f).group(1)
-                     for f in sync.diagram_findings(cl.scan(text, "c"), "c", set(range(1, 99)), "x.c")}
+            found = {key.split("|")[2]
+                     for key, _ in sync.diagram_findings(cl.scan(text, "c"), "c", set(range(1, 99)), "x.c")}
             expected = {"none": set(), "rename": {"DIAGRAM-FIELD"}, "swap": {"DIAGRAM-ORDER"},
-                        "resize": {"DIAGRAM-SIZE"}}[mutation]
+                        "resize": {"DIAGRAM-SIZE"}, "insert": {"DIAGRAM-FIELD"}}[mutation]
             self.assertEqual(found, expected, "seed %d trial %d: %s" % (SEED, trial, text))
+
+    def test_polyglot_fixtures_are_clean_and_their_mutations_are_caught(self):
+        # Hipp's rule applied to the checker itself: every fixture is clean as
+        # written, and each derived mutation must produce exactly its expected
+        # finding, or none where the parser cannot be certain.
+        self.assertEqual(sorted(os.listdir(FIXTURES)), sorted(FIXTURE_MUTATIONS))
+        for name, expected in sorted(FIXTURE_MUTATIONS.items()):
+            text, family = read("tests/fixtures/" + name), cl.family_of(name)
+            everything = set(range(1, text.count("\n") + 2))
+            with self.subTest(fixture=name):
+                self.assertEqual(sync.audit(name, family, text, everything, set()), [])
+                self.assertEqual(cl.debt_markers(name, text), [])
+                for how, kind in zip(("swap", "rename", "resize"), expected):
+                    mutated = mutate_strip(text, how)
+                    found = {key.split("|")[2] for key, _ in
+                             sync.diagram_findings(cl.scan(mutated, family), family, everything, name)} if mutated else set()
+                    self.assertEqual(found, {kind} if kind else set(), how)
 
     def test_quiet_outside_scope(self):
         path = self.repo.write("notes.md", "// free(buf);\n")
@@ -965,7 +1071,7 @@ EXTRACTOR_FIXTURES.update({
 })
 
 
-class MetricsTest(unittest.TestCase):
+class GateTest(unittest.TestCase):
     def setUp(self):
         self.repo = Repo()
         self.sessions = []
@@ -973,19 +1079,23 @@ class MetricsTest(unittest.TestCase):
     def tearDown(self):
         self.repo.close()
         for session in self.sessions:
-            state = os.path.join(tempfile.gettempdir(),
-                                 "craft-gate-%s.txt" % hashlib.sha1(session.encode()).hexdigest()[:16])
-            if os.path.exists(state):
-                os.remove(state)
+            for kind in ("snap", "gate"):
+                state = gatekeeper._state_path(kind, session)
+                if os.path.exists(state):
+                    os.remove(state)
 
-    def gate(self, session=None, active=False, cwd=None):
+    def hook(self, *args, session=None, active=False, cwd=None):
+        """Run craft-gate.py with a hook payload; a fresh session unless one is given."""
         session = session or str(uuid.uuid4())
         self.sessions.append(session)
-        data = json.dumps({"hook_event_name": "Stop", "session_id": session, "stop_hook_active": active,
-                           "cwd": cwd or self.repo.path})
-        return script("craft-metrics.py", "--gate", cwd=cwd or self.repo.path, stdin=data)
+        data = json.dumps({"hook_event_name": "SessionStart" if args else "Stop", "session_id": session,
+                           "stop_hook_active": active, "cwd": cwd or self.repo.path})
+        return script("craft-gate.py", *args, cwd=cwd or self.repo.path, stdin=data)
 
-    def test_gate_reports_new_violations_once_per_session(self):
+    def gate(self, session=None, active=False, cwd=None):
+        return self.hook(session=session, active=active, cwd=cwd)
+
+    def test_review_signals_are_shown_once_per_session(self):
         self.repo.write("core.c", "int base(int x) { return x; }\n")
         self.repo.commit()
         self.repo.write("core.c", c_function("helper", 5, static=True)
@@ -993,11 +1103,94 @@ class MetricsTest(unittest.TestCase):
         session = str(uuid.uuid4())
         code, out, err = self.gate(session)
         self.assertEqual((code, out), (2, ""), err)
+        self.assertIn("Review signals, shown once", err)
         self.assertIn("[RHYTHM] 'pipeline' has 45 LOC", err)
         self.assertIn("[HELPER] 'helper' (5 LOC) has a single caller", err)
+        self.assertNotIn("fix before finishing", err)
+        self.assertEqual(self.gate(session, active=True), (0, "", ""))
         self.assertEqual(self.gate(session), (0, "", ""))
         self.assertEqual(self.gate()[0], 2)
-        self.assertEqual(self.gate(active=True), (0, "", ""))
+
+    def test_hard_findings_block_every_stop_then_are_released(self):
+        self.repo.write("lib.c", "/* old_parse() is kept for the CLI. */\nint old_parse(int x) { return x; }\n")
+        self.repo.commit()
+        self.repo.write("lib.c", f"/* old_parse() is kept for the CLI. */\nint new_parse(int x) {{ return x; }}\n"
+                                 f"// {TODO}: tidy up\n")
+        session = str(uuid.uuid4())
+        for attempt in range(gatekeeper.MAX_TRIES):
+            code, out, err = self.gate(session, active=attempt > 0)
+            self.assertEqual((code, out), (2, ""), err)
+            self.assertIn("lib.c:1: [ORPHAN] 'old_parse'", err)
+            self.assertIn("lib.c:3: [TODO]", err)
+        code, out, err = self.gate(session, active=True)
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn("2 unresolved finding(s)", json.loads(out)["systemMessage"])
+        self.assertEqual(self.gate(session), (0, "", ""))
+        # A new violation is a new finding: it blocks again.
+        with open(os.path.join(self.repo.path, "lib.c"), "a", encoding="utf-8", newline="\n") as fh:
+            fh.write(f"// {FIXME} breaks on empty input\n")
+        code, _, err = self.gate(session)
+        self.assertEqual(code, 2, err)
+        self.assertIn("lib.c:4: [NO-TRIGGER]", err)
+        self.assertNotIn("ORPHAN", err)
+
+    def test_decide_caps_blocks_per_turn_and_per_finding(self):
+        decide, tries = gatekeeper.decide, gatekeeper.MAX_TRIES
+        # A different hard finding at every Stop of one turn: the turn cap lets Claude stop.
+        state = {}
+        for i in range(tries):
+            block, _, release, state = decide(state, i > 0, [("k%d" % i, "m%d" % i)], [])
+            self.assertEqual((block, release), ([("k%d" % i, "m%d" % i)], []))
+        block, _, release, state = decide(state, True, [("k9", "m9")], [])
+        self.assertEqual((block, release), ([], ["m9"]))
+        # A new turn starts a new streak; the released finding still has tries left.
+        block, _, release, state = decide(state, False, [("k9", "m9")], [])
+        self.assertEqual((block, release), ([("k9", "m9")], []))
+        # A finding that disappears forgets its tries; soft findings show once.
+        _, show, _, state = decide(state, True, [], [("s", "signal")])
+        self.assertEqual((state["tries"], show), ({}, [("s", "signal")]))
+        self.assertEqual(decide(state, True, [], [("s", "signal")])[1], [])
+        # Without a session there is no state: everything is reported.
+        self.assertEqual(decide({}, False, [("k", "m"), ("k", "m2")], [])[0], [("k", "m"), ("k", "m2")])
+
+    def test_gate_sees_bash_edits_and_skips_files_dirty_before_the_session(self):
+        self.repo.write("README", "fixture\n")
+        self.repo.commit()
+        wip = self.repo.write("wip.py", f"# {TODO}: the user's own work in progress\nX = 1\n")
+        session = str(uuid.uuid4())
+        self.assertEqual(self.hook("--snapshot", session=session), (0, "", ""))
+        self.assertEqual(self.gate(session), (0, "", ""))
+        # A generator run through Bash: no PostToolUse hook ever saw this file.
+        self.repo.write("gen.py", f"# {TODO}: generated\nY = 2\n")
+        code, _, err = self.gate(session)
+        self.assertEqual(code, 2, err)
+        self.assertIn("gen.py:1: [TODO]", err)
+        self.assertNotIn("wip.py", err)
+        # Once the session touches the dirty file, it is the session's business.
+        with open(wip, "a", encoding="utf-8", newline="\n") as fh:
+            fh.write("Z = 3\n")
+        code, _, err = self.gate(session, active=True)
+        self.assertIn("wip.py:1: [TODO]", err)
+
+    def test_one_stop_runs_every_scanner(self):
+        self.repo.write("README", "fixture\n")
+        self.repo.commit()
+        self.repo.write("frame.c", "/* frame.c -- one length-prefixed frame header and its parser. */\n"
+                                   "#include <stdint.h>\n\n/* Layout: [kind:1B][len:1B] */\nstruct frame {\n"
+                                   "    uint8_t len;\n    uint8_t kind;\n};\n_Static_assert(sizeof(struct frame) == 2,"
+                                   " \"two bytes\");\n// " + TODO + ": validate kind\n\n/* Parse a frame. */\n"
+                                   + c_function("frame_parse", 45))
+        code, _, err = self.gate()
+        self.assertEqual(code, 2, err)
+        self.assertEqual(sorted(re.findall(r"^frame\.c:\d+: \[([A-Z-]+)\]", err, re.M)),
+                         ["DIAGRAM-ORDER", "RHYTHM", "TODO"])
+
+    def test_polyglot_fixtures_pass_the_whole_gate(self):
+        self.repo.write("README", "fixture\n")
+        self.repo.commit()
+        for name in os.listdir(FIXTURES):
+            self.repo.write("tests/fixtures/" + name, read("tests/fixtures/" + name))
+        self.assertEqual(self.gate(), (0, "", ""))
 
     def test_gate_accepts_guides_and_why(self):
         self.repo.write("core.c", "int base(int x) { return x; }\n")
@@ -1041,7 +1234,7 @@ class MetricsTest(unittest.TestCase):
         self.repo.write("tiny.c", "int a(void) { return 1; }\nint b(void) { return 2; }\nint c(void) { return 3; }\n")
         code, _, err = self.gate()
         self.assertEqual(code, 2)
-        self.assertIn("tiny.c:1: [DMOD] D_mod 1.0 < 15 (3 LOC / 3 public functions)", err)
+        self.assertIn("tiny.c:1: [DMOD] D_mod 1.0 (3 LOC / 3 public functions, signal below 15)", err)
 
     def test_gate_layout_assertions(self):
         self.repo.write("README", "fixture\n")
@@ -1056,11 +1249,14 @@ class MetricsTest(unittest.TestCase):
     def test_gate_is_silent_outside_git(self):
         plain = Repo(git=False)
         try:
-            plain.write("big.c", c_function("pipeline", 80))
+            plain.write("big.c", c_function("pipeline", 80) + "// " + TODO + ": no baseline, no judgment\n")
             self.assertEqual(self.gate(cwd=plain.path), (0, "", ""))
+            self.assertEqual(self.hook("--snapshot", cwd=plain.path), (0, "", ""))
         finally:
             plain.close()
 
+
+class MetricsTest(unittest.TestCase):
     def test_report_json(self):
         plain = Repo(git=False)
         try:
@@ -1189,7 +1385,9 @@ class LayoutTest(unittest.TestCase):
             text = read("agents/" + name)
             self.assertRegex(text, r"\A---\nname: %s\ndescription: " % re.escape(name[:-3]))
             self.assertRegex(text, r"\ntools: [A-Z][\w, ]+\nmodel: \w+\n---\n")
-        self.assertRegex(read("commands/honey.md"), r"\A---\ndescription: .+\nargument-hint: ")
+        for name in ("tupelo", "honey"):
+            self.assertRegex(read("commands/%s.md" % name), r"\A---\ndescription: .+\nargument-hint: ")
+        self.assertRegex(read("commands/honey.md"), r"\A---\ndescription: Alias of /tupelo\. ")
 
     def test_hooks_point_at_existing_scripts(self):
         hooks = json.loads(read("hooks/hooks.json"))["hooks"]
@@ -1199,10 +1397,23 @@ class LayoutTest(unittest.TestCase):
             for hook in (h for group in groups for h in group["hooks"]):
                 m = re.search(r'"\$\{CLAUDE_PLUGIN_ROOT\}/(bin/[\w.-]+)"', hook["command"])
                 self.assertTrue(m and os.path.isfile(os.path.join(ROOT, m.group(1))), hook["command"])
+        # One Stop gate runs every scanner; SessionStart takes its snapshot.
+        self.assertEqual([h["command"].split("/bin/")[1] for h in hooks["Stop"][0]["hooks"]], ['craft-gate.py"'])
+        self.assertTrue(any("craft-gate.py\" --snapshot" in h["command"] for h in hooks["SessionStart"][0]["hooks"]))
 
     def test_agents_md_budget_and_claude_md_import(self):
         self.assertLess(len(read("AGENTS.md").splitlines()), 200)
         self.assertEqual(read("CLAUDE.md").strip(), "@AGENTS.md")
+
+    def test_agents_md_keeps_the_nine_kinds_and_verbatim_blocks(self):
+        # A guard against lossy rewrites (honey-compress or a hand edit): the
+        # nine kinds stay distinct and in antirez's order, code blocks intact.
+        text = read("AGENTS.md")
+        self.assertEqual(re.findall(r"^\d\. \*\*(\w+)\*\*", text, re.M),
+                         ["Function", "Design", "Why", "Teacher", "Checklist", "Guide", "Trivial", "Debt", "Backup"])
+        self.assertEqual(text.count("```") % 2, 0)
+        self.assertIn('   Node "ANNIBALE" -> "SCO" -> [], inserting "ANNIENTARE".\n'
+                      '   $SPLITPOS = 4 (first mismatch: \'B\' in node, \'E\' in key).\n', text)
 
     def test_mirrors_in_sync(self):
         code, _, err = run([BASH, posix(os.path.join(ROOT, "scripts", "sync-mirrors.sh")), "--check"])

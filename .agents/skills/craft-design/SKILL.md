@@ -31,17 +31,17 @@ Stop for user approval only when the choice changes a public API, a storage or w
 - **Special cases.** Count the cases needed to explain the interface. Aim for <= 2; above 3 (or an invariant longer than one sentence, or "except when" more than twice) STOP and simplify: drop the marginal feature and record it under "Known limitations", or pull the case down into the representation (a sentinel head node lets an empty tree and a full one share one pointer path).
 - **Don't parse (djb).** Prefer length-prefixed, binary-safe framing (`[len][bytes]`, netstrings `5:hello,`) over delimiter-terminated text that needs a stateful parser: fewer lines, one bug class gone.
 - **Safe primitive over checks everywhere.** One `sds`/`stralloc`-style type that owns length and capacity removes buffer overflows from every caller; a guard per call site does not.
-- **Narrow interface.** <= 3 boolean parameters in any public signature; D_mod = implementation LOC / public functions >= 15.
+- **Narrow interface.** <= 3 boolean parameters in any public signature; D_mod = implementation LOC / public functions, with < 15 as the signal to look for shallow entry points.
 - **Zero-cost compatibility.** Hand callers a pointer to the payload and keep the metadata right before it (`s - sizeof(hdr)`, flags at `s[-1]`), so the value still works with existing APIs (`printf("%s", s)`).
 
 ## 4. Write the header
 One Design comment per module at its entry point (AGENTS.md §4): problem, structures, layout, invariants, concurrency, rejected alternatives, known limitations. Then a Teacher comment with an exact diagram before every struct whose layout matters. Shapes: bracket strips, linear chains, indented trees, byte-offset tables. Never multi-column box grids.
 
-For a physical layout, write the strip as `[field:size]` cells in declaration order: `[len:1B][alloc:1B][flags:1B][buf: len bytes]` (`B` bytes, `b` bits, a bare number is bits for a bitfield and bytes otherwise; `header`, `hdr`, `pad`, `padding`, `payload` are synthetic and need no field, and a sized `header` must equal the leading fields it summarizes, like raxNode's `[header:32b]` over `iskey:1 isnull:1 iscompr:1 size:29`). The edit hook then checks names, order and fixed widths, and the assertion that craft-code puts next to the type lets the compiler check padding and offsets. Free-form teaching diagrams (trees, chains, examples) stay free-form and unchecked.
+For a physical layout, write the strip as `[field:size]` cells in declaration order: `[len:1B][alloc:1B][flags:1B][buf: len bytes]` (`B` bytes, `b` bits, a bare number is bits for a bitfield and bytes otherwise; `header`, `hdr`, `pad`, `padding`, `payload` are synthetic and need no field, and a sized `header` must equal the leading fields it summarizes, like raxNode's `[header:32b]` over `iskey:1 isnull:1 iscompr:1 size:29`). The Stop gate then checks names, order, gaps and fixed widths (a struct with members it cannot read, like a macro field or an `#if`, only for order and widths), and the assertion that craft-code puts next to the type lets the compiler check padding and offsets. Free-form teaching diagrams (trees, chains, examples) stay free-form and unchecked.
 
 ## Canonical examples
 
-### A. A Design comment that teaches with trees (antirez/rax, `rax.h`, BSD-2-Clause; verbatim, trimmed with `[...]`)
+### A. A Design comment that teaches with trees (antirez/rax, `rax.h`, BSD-3-Clause, see LICENSE; verbatim, trimmed with `[...]`)
 ```c
 /* Representation of a radix tree as implemented in this file, that contains
  * the strings "foo", "foobar" and "footer" after the insertion of each
@@ -104,7 +104,7 @@ typedef struct raxNode {
 ```
 `rax.c` later inserts alignment padding between the characters and the pointers (`raxPadding()`): when you copy this idea, put the padding in your own diagram, `[hdr:32b][chars][pad][ptrs](value-ptr?)`. Diagrams must match the code.
 
-### C. A prefix header behind the payload pointer (antirez/sds, `sds.h`, BSD-2-Clause)
+### C. A prefix header behind the payload pointer (antirez/sds, `sds.h`, BSD-3-Clause, see LICENSE)
 Verbatim:
 ```c
 struct __attribute__ ((__packed__)) sdshdr8 {

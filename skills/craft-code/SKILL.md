@@ -2,28 +2,30 @@
 name: craft-code
 description: >-
   Use when writing or substantially changing implementation code in any
-  language. Enforces deep cohesive functions over single-caller helpers, Guide
-  comments every 15-25 LOC, Why and Checklist comments, one centralized cleanup
-  path for >= 2 fallible resources, allocate-before-mutate, layout diagrams
-  pinned by compile-time size/offset assertions, and a *Show/*Dump
+  language. Favors deep cohesive functions over single-caller helpers, Guide
+  comments that title blocks, Why and Checklist comments, one centralized
+  cleanup path for >= 2 fallible resources, allocate-before-mutate, layout
+  diagrams pinned by compile-time size/offset assertions, and a *Show/*Dump
   introspection primitive, with real raxGenericInsert and raxShow excerpts as
-  models.
+  models; its numbers are review signals, never quotas.
 license: MIT
 ---
 
 # craft-code: cohesive implementation, readable top to bottom
 
 ## Rules (LOC = non-blank, non-comment lines)
-1. **Cohesive deep functions.** Keep an algorithm that shares local state (tree insertion, a state-machine step, packet decoding) in one function instead of 8 helpers passing 7 variables by reference. A helper with 1 caller and < 30 LOC is inlined under a Guide comment unless a `Why:` comment names its benefit: semantic boundary, resource ownership, removed duplication, or test seam. `craft-metrics.py --gate` reports violations at Stop.
-2. **Guide rhythm.** Functions >= 40 LOC (or with >= 3 phases): one Guide comment every 15-25 LOC, a short line stating the goal of the next block. >= 80 LOC or multi-branch: a numbered step map (`1.`, `2.`, `3a.`, `3b.`) in the Teacher or Function comment, the same numbers as headers above the matching blocks.
+1. **Cohesive deep functions.** Keep an algorithm that shares local state (tree insertion, a state-machine step, packet decoding) in one function instead of 8 helpers passing 7 variables by reference. A helper with 1 caller and < 30 LOC is inlined under a Guide comment unless a `Why:` comment names its benefit: semantic boundary, resource ownership, removed duplication, or test seam. The Stop gate shows such helpers once, as the HELPER review signal.
+2. **Guide rhythm.** Functions >= 40 LOC (or with >= 3 phases): about one Guide comment every 15-25 LOC, a short line titling the block of statements below it; a flat `switch` or table needs none, and a comment over one statement it restates is Trivial. >= 80 LOC or multi-branch: a numbered step map (`1.`, `2.`, `3a.`, `3b.`) in the Teacher or Function comment, the same numbers as headers above the matching blocks.
 3. **Why comments** wherever the obvious rewrite would break something: ordering, timeouts, protocol quirks, regressions. Every bug fix gets one ("moved before X due to bug Y; do not reorder").
 4. **Checklist comments** at both ends of a coupling the compiler cannot enforce (after trying a single table, an exhaustive `switch`/`match`, `static_assert`, or a failing test).
 5. **One cleanup path** for >= 2 fallible acquisitions: handles start at NULL/None, every failure jumps to one teardown block. Never duplicate multi-line teardown across branches (translations below).
 6. **Allocate before you mutate.** Acquire everything a structural change needs first; if any acquisition fails, release and return while the structure is still untouched (rax: "OOM? Abort now that the tree is untouched.").
-7. **Teacher diagram before pointer math**, bitfields, packed or flexible-array layouts (craft-design for the format), a **Function comment** above every public function, a **Design comment** (or a pointer to it) at the top of every module. The Stop gate reports what is missing as NO-TEACHER, NO-DOC and NO-DESIGN.
-8. **Pin every physical layout.** Draw it with `[field:size]` cells in declaration order (the edit hook checks names, order and fixed widths: DIAGRAM-FIELD, -ORDER, -SIZE) and assert its size or offsets where the compiler or the test suite runs (examples below; the Stop gate reports NO-LAYOUT-ASSERT). Logical diagrams (trees, `->` chains, state machines) need no assertion. Never assert `int`, `long`, `size_t` or pointer widths as constants: they change between LP64 and LLP64.
+7. **Teacher diagram before pointer math**, bitfields, packed or flexible-array layouts (craft-design for the format), a **Function comment** above every public function, a **Design comment** (or a pointer to it) at the top of every module. The Stop gate shows what is missing as the NO-TEACHER, NO-DOC and NO-DESIGN signals.
+8. **Pin every physical layout.** Draw it with `[field:size]` cells in declaration order (the Stop gate checks names, order, gaps and fixed widths as hard findings: DIAGRAM-FIELD, -ORDER, -SIZE) and assert its size or offsets where the compiler or the test suite runs (examples below; a missing one is the NO-LAYOUT-ASSERT signal). Whenever a diagram states offsets or byte sizes, the `static_assert`/`_Static_assert` on `sizeof` and `offsetof` (or the language's form) is part of the same change: the compiler then refuses a layout that drifts from the drawing. Logical diagrams (trees, `->` chains, state machines) need no assertion. Never assert `int`, `long`, `size_t` or pointer widths as constants: they change between LP64 and LLP64.
 9. **Say something.** A comment made only of generic words ("Process the data", "Handle edge cases") is reported as VAGUE: name the domain fact, the limit or the reason.
-10. **Introspection primitive.** Every non-trivial data structure ships a dumper (`raxShow` style) that prints its topology compactly, so humans, tests and agents can check invariants at a glance.
+10. **Introspection primitive.** Non-trivial data structures (trees, graphs, allocators, caches) ship a dumper (`raxShow` style) that prints their topology compactly, so humans, tests and agents can check invariants at a glance.
+
+**Signals, not quotas.** 30 LOC, 15-25 LOC, 40 LOC and D_mod 15 are diagnostic signals that point at shallow wrappers and opaque blocks. The sovereign criterion is a lower cognitive load for the reader (ΔL_cog < 0) and the four helper benefits of AGENTS.md §1. Never add a comment, merge a function or split one only to move a number; when a signal is wrong for the code at hand, leave the code and, for a helper, name its benefit in a `Why:` comment.
 
 ## Pin the diagram: layout assertions per language
 The script can check that a diagram names the fields in order with plausible widths; only the compiler knows padding and real offsets. Put the numbers of the diagram in an assertion next to the type:
@@ -81,7 +83,7 @@ assert ctypes.sizeof(Hdr) == 2, "Hdr layout changed: update the diagram"
 ```
 C++ uses `static_assert(offsetof(...) == N)`, C# `Debug.Assert(Marshal.SizeOf<Hdr>() == 6)` in a test, Swift `assert(MemoryLayout<Hdr>.size == 6)`.
 
-## Canonical examples (antirez/rax, `rax.c`, BSD-2-Clause; verbatim, trimmed with `[...]`)
+## Canonical examples (antirez/rax, `rax.c`, BSD-3-Clause, see LICENSE; verbatim, trimmed with `[...]`)
 
 ### A. Numbered Teacher comment and its Guide anchors (`raxGenericInsert`)
 The Teacher comment above the split code walks five concrete cases with diagrams, then states the algorithm as numbered steps:

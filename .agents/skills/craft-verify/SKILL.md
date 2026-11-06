@@ -17,7 +17,7 @@ license: MIT
 ## Proof 1: differential fuzzing against a trivial oracle
 Run the optimized structure (SUT) next to an obviously correct model (a hash table, `dict`, `Map`, a sorted array, a brute-force scan). Apply 10^4 to 10^6 seeded random operations; after each one compare return values, and at the end compare sizes and full contents. Bias the generator toward the encodings that are special (empty keys, NULL values, shared prefixes, maximum sizes).
 
-From antirez/rax, `rax-test.c` (BSD-2-Clause; verbatim, trimmed with `[...]`):
+From antirez/rax, `rax-test.c` (BSD-3-Clause, see LICENSE; verbatim, trimmed with `[...]`):
 ```c
 /* Perform a fuzz test, returns 0 on success, 1 on error. */
 int fuzzTest(int keymode, size_t count, double addprob, double remprob) {

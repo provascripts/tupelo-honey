@@ -1,25 +1,41 @@
-"""craftlib -- shared lexer, struct parser and git plumbing for the tupelo-honey scripts.
+"""craftlib -- shared lexer, struct parser, debt markers and git plumbing for the tupelo-honey scripts.
 
-Design notes for bin/ (craft-comment-sync.py, craft-metrics.py and this module):
+Design notes for bin/ (craft-debt-scan.py, craft-comment-sync.py,
+craft-metrics.py, craft-gate.py and this module):
 
-  The scripts run as Claude Code hooks after every edit and at every Stop, so
-  they must be fast, dependency-free (Python 3.8+ stdlib) and silent: they
-  print nothing and exit 0 unless they found a violation. Findings go to
-  stderr with exit code 2, the only code Claude Code feeds back to the model;
-  run by hand, the same findings go to stdout with exit code 1.
+  The scripts run as Claude Code hooks, so they must be fast,
+  dependency-free (Python 3.8+ stdlib) and silent: they print nothing and
+  exit 0 unless they found a violation. Findings go to stderr with exit code
+  2, the only code Claude Code feeds back to the model; run by hand, the same
+  findings go to stdout with exit code 1. Every finding is one line,
+  "path:line: [KIND] detail".
+
+  The hooks work on two levels, so that a change spread over several edits
+  is never interrupted half-way:
+
+    PostToolUse   judges the lines one Edit, Write or MultiEdit wrote, and
+                  only what those lines decide alone: debt markers, Backup,
+                  Trivial and Vague comments (craft-debt-scan.py --hook,
+                  craft-comment-sync.py --hook).
+    Stop          judges every file the session changed, Bash edits included
+                  (craft-gate.py): the same checks plus orphaned symbols and
+                  [field:size] diagrams are hard findings that block each Stop
+                  until fixed, at most 3 times each; the craft-metrics review
+                  signals are shown once per session.
 
   Parsing is lexical, not syntactic. scan() turns a file into one
-  Line(code, comment, kind, raw) per source line. _SPEC lists, per language
-  family, the tokens that open a comment or a literal and how each one ends;
-  one regex search jumps from opener to opener:
+  Line(code, comment, kind, raw, parts) per source line. _SPEC lists, per
+  language family, the tokens that open a comment or a literal and how each
+  one ends; one regex search jumps from opener to opener:
 
       'x = f("//"); // why: f is idempotent'
-          -> Line(code='x = f(""); ', comment='why: f is idempotent', kind='line', raw=<the line>)
+          -> Line(code='x = f(""); ', comment='why: f is idempotent', kind='line',
+                  raw=<the line>, parts=('why: f is idempotent',))
 
   String and regex literals collapse to "" so that braces, quotes and comment
   markers inside them can never be mistaken for structure. Everything above
-  this layer (brace matching, identifiers, comment checks, struct fields)
-  reads that output.
+  this layer (brace matching, identifiers, comment checks, debt markers,
+  struct fields) reads that output.
 
   Languages (FAMILY maps the extensions; any other extension is skipped,
   never guessed): C, C++, Objective-C, CUDA, GLSL/HLSL, Java, C#, Kotlin,
@@ -36,10 +52,15 @@ Design notes for bin/ (craft-comment-sync.py, craft-metrics.py and this module):
   - A JS regex literal is told apart from a division by the previous code
     character on the same line only; a shell '#' opens a comment only at the
     start of a word.
+  - Debt markers in files without a lexer family (YAML, TOML, HTML,
+    Dockerfile, Makefile...) are found by a line match on the usual comment
+    openers, which cannot tell a quoted "# TODO" from a real comment.
   - Struct fields are parsed for C, C++, C#, Rust, Zig, Go, Swift and Python
     ctypes only; widths are known only for fixed-width types, never for int,
     long, size_t or pointers, whose size depends on the platform (LP64 vs
-    LLP64).
+    LLP64). A struct with a member the parser does not understand (a macro,
+    an anonymous union, an #if, a base class, a virtual method) is inexact:
+    only the order and widths of the fields it did read are checked.
 """
 
 import json
@@ -76,7 +97,9 @@ IDENT = re.compile(r"[A-Za-z_$][\w$]*")
 # (//, #, --, ;...), 'block' (/* */ on one line), 'multi' (a block comment
 # across lines) or 'doc' (///, //!, /** */, docstrings...). Both are None
 # otherwise. `raw` is the original line, for indentation and raw literals.
-Line = namedtuple("Line", "code comment kind raw")
+# `parts` holds each comment of the line on its own ('a' and 'b' for
+# `/* a */ x; // b`), where `comment` joins them: a debt marker must open one.
+Line = namedtuple("Line", "code comment kind raw parts", defaults=((),))
 
 # Openers per family, tried left to right at each position: longer tokens
 # first. Handlers: line (comment to end of line), block (comment up to the
@@ -130,20 +153,23 @@ def family_of(path):
 
 
 def scan(text, family):
-    """Split source text into one Line(code, comment, kind, raw) per source line.
+    """Split source text into one Line(code, comment, kind, raw, parts) per source line.
 
     `code` keeps everything outside comments, with each string or regex
     literal reduced to "" (a multi-line literal leaves a lone " on every line
     it crosses, so those lines still count as code). `comment` is the comment
-    text without delimiters or leading '*'. Never raises on malformed input:
-    an unterminated literal or comment simply runs to the end of its line or
-    of the file. Line endings are normalized, so `\\r\\n` files work too.
+    text without delimiters or leading '*'; a line comment also loses the
+    repeated opener characters of ';;', '%%' or '##'. Never raises on
+    malformed input: an unterminated literal or comment simply runs to the
+    end of its line or of the file. Line endings are normalized, so `\\r\\n`
+    files work too.
     """
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     n = text.count("\n") + 1
     code = [[] for _ in range(n)]
     com = [None] * n
     kind = [None] * n
+    parts = {}
     spec, opener = _SPEC[family], _OPENERS[family]
     ln = 0
 
@@ -173,7 +199,9 @@ def scan(text, family):
                 part = part.lstrip("*").strip()
             com[ln] = part if com[ln] is None else (com[ln] + " " + part).strip()
             kind[ln] = kind[ln] or k
+            parts.setdefault(ln, []).append(part)
 
+    # Where a closer starts and ends; both are len(text) when it is missing.
     def until(close, start):
         j = text.find(close, start)
         return (len(text), len(text)) if j < 0 else (j, j + len(close))
@@ -196,7 +224,12 @@ def scan(text, family):
             body = text[m.end():end]
             doc = (tok == "//" and body[:1] in ("/", "!")) or (family == "nim" and body[:1] == "#") \
                 or (family == "lua" and body[:1] == "-") or (family == "hs" and body.lstrip()[:1] in ("|", "^"))
-            put_comment(body[1:] if doc and family != "hs" else body, "doc" if doc else "line")
+            body = body[1:] if doc and family != "hs" else body
+            # Why: ';;' (Lisp), '%%' (Erlang) and '##' banners repeat the opener
+            # as decoration; the comment text, and any debt marker, starts after.
+            if not tok[-1].isalnum():
+                body = body.lstrip(tok[-1])
+            put_comment(body, "doc" if doc else "line")
         elif how == "block":
             inner_end, end = until(entry[2], m.end())
             inner = text[m.end():inner_end]
@@ -252,7 +285,7 @@ def scan(text, family):
         pos = end
 
     raws = text.split("\n")
-    return [Line("".join(code[i]), com[i], kind[i], raws[i]) for i in range(n)]
+    return [Line("".join(code[i]), com[i], kind[i], raws[i], tuple(parts.get(i, ()))) for i in range(n)]
 
 
 def code_identifiers(lines):
@@ -260,6 +293,82 @@ def code_identifiers(lines):
     out = set()
     for line in lines:
         out.update(IDENT.findall(line.code))
+    return out
+
+
+# --------------------------------------------------------------------------
+# Debt markers (AGENTS.md, "Debt"). A marker opens a comment and carries its
+# own exit condition:
+#
+#     "shortcut: <quantified ceiling>; <revisit trigger>"   deliberate simplification
+#     "FIXME: <defect>; <trigger condition>"                 known defect
+#
+# The ceiling needs at least one digit ("~10k entries", "<1ms", "n > 5000"),
+# the trigger a ';', a '>' or one of the words in TRIGGER. 'honey:' is the
+# legacy spelling of 'shortcut:'; a bare TODO is always a violation. In a
+# file with a lexer family only real comments count, never a string literal;
+# other text files fall back to a line match on #, //, --, /* and a leading
+# * (<!-- in markup).
+# --------------------------------------------------------------------------
+
+MARKER = re.compile(r"(?P<tag>shortcut:|honey:|TODO(?!\w)|FIXME(?!\w))(?P<rest>.*)", re.S)
+TRIGGER = re.compile(r"[;>]|\b(?:if|when|whenever|once|unless|until|after|upon|triggers?|over|above|past|exceeds|"
+                     r"beyond)\b", re.I)
+PROSE_EXT = (".md", ".mdc", ".markdown", ".rst", ".txt")
+MARKUP_EXT = (".html", ".htm", ".xhtml", ".xml", ".vue", ".svelte")
+_MARK_AHEAD = r"(?=shortcut:|honey:|TODO(?!\w)|FIXME(?!\w))"
+_FALLBACK = re.compile(r"(?:(?:^|(?<=\s))(?:#|//|--|/\*)|^\s*\*)\s*" + _MARK_AHEAD)
+_FALLBACK_MARKUP = re.compile(r"<!--\s*" + _MARK_AHEAD)
+
+
+def debt_verdict(tag, rest):
+    """Return '' for a well-formed marker, else its violation: TODO, NO-CEILING or NO-TRIGGER."""
+    if tag.startswith("TODO"):
+        return "TODO"
+    trigger = TRIGGER.search(rest) is not None
+    if tag.startswith("FIXME"):
+        return "" if trigger else "NO-TRIGGER"
+    if not re.search(r"\d", rest):
+        return "NO-CEILING"
+    return "" if trigger else "NO-TRIGGER"
+
+
+def debt_scannable(path):
+    """Return True unless `path` is prose (it talks about markers) or minified JavaScript."""
+    low = path.lower()
+    return not low.endswith(PROSE_EXT) and not low.endswith(".min.js")
+
+
+def debt_markers(path, text, numbers=None):
+    """Return (line, verdict, source line) for every debt marker that opens a comment in `text`.
+
+    `verdict` is '' for a well-formed marker, else TODO, NO-CEILING or
+    NO-TRIGGER. `numbers`, when given, limits the result to those 1-based
+    lines. Prose, minified JavaScript and text containing a NUL byte (binary)
+    yield []. One marker per line: the first comment that opens with one.
+    """
+    if not debt_scannable(path) or "\0" in text[:8192]:
+        return []
+    family = family_of(path)
+    out = []
+    if family:
+        for no, line in enumerate(scan(text, family), 1):
+            if numbers is not None and no not in numbers:
+                continue
+            for part in line.parts:
+                m = MARKER.match(part)
+                if m:
+                    out.append((no, debt_verdict(m.group("tag"), m.group("rest")), line.raw.strip()))
+                    break
+        return out
+    opener = _FALLBACK_MARKUP if path.lower().endswith(MARKUP_EXT) else _FALLBACK
+    for no, raw in enumerate(text.replace("\r\n", "\n").replace("\r", "\n").split("\n"), 1):
+        if numbers is not None and no not in numbers:
+            continue
+        m = opener.search(raw)
+        mark = MARKER.match(raw, m.end()) if m else None
+        if mark:
+            out.append((no, debt_verdict(mark.group("tag"), mark.group("rest")), raw.strip()))
     return out
 
 
@@ -281,8 +390,11 @@ def code_identifiers(lines):
 Field = namedtuple("Field", "name bits bitfield")
 # line: the definition line; first..last: the lines from '{' to '}' (the
 # indented body for Python); packed: a layout marker applies (packed,
-# #[repr], extern struct, [StructLayout], ctypes).
-Struct = namedtuple("Struct", "name aliases line first last fields packed")
+# #[repr], extern struct, [StructLayout], ctypes); exact: every member was
+# understood and no #if selects members, so a cell naming no field, a field
+# missing between two cells and a header sum can be judged (when False only
+# the order and widths of the fields found are).
+Struct = namedtuple("Struct", "name aliases line first last fields packed exact")
 
 CELL = re.compile(r"\[\s*(?P<name>[A-Za-z_][\w.-]*)\s*:\s*(?P<size>[^\]\n]*)\]")
 CELL_SIZE = re.compile(r"^(?P<num>\d+)\s*(?P<unit>B|bytes?|b|bits?)?(?!\w)")
@@ -306,9 +418,14 @@ _BITS = {
            "c_uint64": 64, "c_int64": 64, "c_double": 64, "c_ulonglong": 64, "c_longlong": 64},
 }
 _QUALIFIERS = re.compile(r"\b(?:const|volatile|static|public|private|internal|protected|readonly|fixed|mut|pub|"
-                         r"struct|union|enum)\b|\bpub\([^)]*\)")
+                         r"struct|union|enum|mutable)\b|\bpub\([^)]*\)")
+# Up to three levels of nested parentheses: __attribute__((aligned(8))).
+_PAREN = r"\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)"
+_C_ATTR = re.compile(r"\b(?:__attribute__|__declspec|alignas|_Alignas|__aligned)\s*" + _PAREN
+                     + r"|\b__packed\b|\[\[.*?\]\]")
 _STRUCT_OPEN = {
-    "c": re.compile(r"\b(?:struct|union)\b(?P<head>[^;{}()=]*(?:\(\([^)]*\)\)[^;{}()=]*)*)\{"),
+    "c": re.compile(r"\b(?:struct|union)\b(?P<head>[^;{}()=]*(?:(?:__attribute__|__declspec|alignas|_Alignas|__aligned)"
+                    r"\s*" + _PAREN + r"[^;{}()=]*)*)\{"),
     "cs": re.compile(r"\bstruct\s+(?P<head>\w+)[^;{}=]*\{"),
     "rs": re.compile(r"\bstruct\s+(?P<head>\w+)(?:<[^>{]*>)?\s*(?:where[^{]*)?\{"),
     "zig": re.compile(r"\bconst\s+(?P<head>\w+)\s*=\s*(?P<mod>(?:packed|extern)\s+)?struct\b[^{=]*\{"),
@@ -317,9 +434,16 @@ _STRUCT_OPEN = {
 }
 _PY_STRUCT = re.compile(r"^\s*class\s+(?P<head>\w+)\s*\([^)]*\b(?:Structure|Union|LittleEndianStructure|"
                         r"BigEndianStructure)\b[^)]*\)\s*:")
-_PY_FIELD = re.compile(r"\(\s*[\"'](?P<name>\w+)[\"']\s*,\s*(?:ctypes\.)?(?P<type>c_\w+)(?:\s*\*\s*(?P<arr>\d+))?"
+_PY_FIELD = re.compile(r"\(\s*[\"'](?P<name>\w+)[\"']\s*,\s*(?P<type>(?:[^,()]|\([^()]*\))+?)"
                        r"(?:\s*,\s*(?P<bits>\d+))?\s*\)")
 _MARKER_ABOVE = re.compile(r"#\[repr\(|\[StructLayout\(|#\s*pragma\s+pack|@frozen\b|__attribute__\s*\(\(\s*_*packed")
+_C_DIRECTIVE = re.compile(r"(?m)^[ \t]*#.*$")
+_C_CONDITIONAL = re.compile(r"(?m)^[ \t]*#\s*(?:if|ifdef|ifndef|elif|else)\b")
+_C_BODY = re.compile(r"\)\s*(?:(?:const|override|final|noexcept|volatile|mutable)\b\s*|&&?\s*|->\s*[\w:<>*&, ]+?\s*)*\{")
+_C_METHOD_END = re.compile(r"\)\s*(?:(?:const|override|final|noexcept|volatile|mutable)\b\s*|&&?\s*)*$")
+_C_MACRO_FIELD = re.compile(r"^[A-Z_][A-Z0-9_]*\s*" + _PAREN + r"\s*\**\s*(?P<name>[A-Za-z_]\w*)\s*(?:\[\s*\w*\s*\])?$")
+_C_NO_STORAGE = re.compile(r"^(?:static|typedef|using|friend|template|enum|namespace|class|struct|union)\b(?![^{]*\{)"
+                           r"(?:\s+\w+)?$|^(?:static|typedef|using|friend|template|namespace)\b")
 
 
 def type_bits(type_text, family, packed=False):
@@ -341,41 +465,6 @@ def type_bits(type_text, family, packed=False):
     return _BITS.get(family, {}).get(t)
 
 
-def _c_fields(statement, family, packed):
-    """Return the Fields declared by one C, C++ or C# struct member statement.
-
-    Why: C declarators (bitfields, arrays, function pointers, several names
-    sharing one type) are a small grammar of their own; kept apart from
-    structs() so that the brace walk there stays readable.
-    """
-    if re.search(r"\(\s*\*\s*(\w+)\s*\)", statement):
-        return [Field(re.search(r"\(\s*\*\s*(\w+)\s*\)", statement).group(1), None, False)]
-    if "(" in statement or "{" in statement and not re.search(r"}\s*\w+\s*$", statement):
-        return []
-    if "{" in statement:
-        return [Field(re.search(r"(\w+)\s*$", statement).group(1), None, False)]
-    parts = statement.split(",")
-    head = re.match(r"^(?P<type>.*?)\b(?P<name>[A-Za-z_]\w*)\s*(?:\[\s*(?P<arr>\w*)\s*\])?\s*(?::\s*(?P<bits>\d+))?\s*$",
-                    parts[0].strip())
-    if not head or not head.group("type").strip():
-        return []
-    out = []
-    for i, part in enumerate(parts):
-        m = head if i == 0 else re.match(r"^\s*\**\s*(?P<name>[A-Za-z_]\w*)\s*(?:\[\s*(?P<arr>\w*)\s*\])?"
-                                         r"\s*(?::\s*(?P<bits>\d+))?\s*$", part)
-        if not m:
-            continue
-        if m.group("bits"):
-            out.append(Field(m.group("name"), int(m.group("bits")), True))
-            continue
-        bits = type_bits(head.group("type") + ("*" if "*" in part else ""), family, packed)
-        arr = m.group("arr")
-        if arr is not None:
-            bits = bits * int(arr) if bits and arr.isdigit() else None
-        out.append(Field(m.group("name"), bits, False))
-    return out
-
-
 def _split_members(body, separators):
     """Split a struct body into member statements at depth 0, keeping nested blocks whole."""
     out, depth, cur = [], 0, []
@@ -391,6 +480,159 @@ def _split_members(body, separators):
             cur.append(ch)
     out.append("".join(cur).strip())
     return [s for s in out if s]
+
+
+def _drop_bodies(body):
+    """Replace each inline function body of a C++/C# struct by ';', so the member after it stands alone.
+
+    Why: brace matching is a concern of its own (a semantic boundary), and
+    keeping it apart leaves _members a plain pipeline: directives out,
+    bodies out, split, parse each member.
+    """
+    out, pos = [], 0
+    while True:
+        m = _C_BODY.search(body, pos)
+        if not m:
+            out.append(body[pos:])
+            return "".join(out)
+        depth, j = 0, m.end() - 1
+        while j < len(body):
+            depth += {"{": 1, "}": -1}.get(body[j], 0)
+            if depth == 0:
+                break
+            j += 1
+        out.append(body[pos:m.end() - 1] + ";")
+        pos = j + 1
+
+
+def _c_fields(statement, family, packed):
+    """Return (fields, understood) for one C, C++ or C# member statement.
+
+    Members without storage (methods, static members, typedefs, nested type
+    definitions without a declarator) give ([], True). Why `understood`: C
+    declarators (bitfields, arrays, function pointers, several names sharing
+    one type) and C++/C# members form a small grammar of their own, and a
+    statement this function does not positively recognize must make the
+    struct inexact instead of silently losing a field, which would turn every
+    cell naming it into a false DIAGRAM-FIELD.
+    """
+    s = _C_ATTR.sub(" ", statement)
+    s = re.sub(r"\b(?:public|private|protected|internal)\s*:", " ", s)
+    if family == "cs":
+        s = re.sub(r"^\s*(?:\[[^\[\]]*\]\s*)+", "", s)
+        s = re.sub(r"^(?:(?:public|private|protected|internal|readonly|unsafe|volatile|new)\s+)+", "", s.strip())
+        if re.match(r"(?:const|static)\b", s):
+            return [], True
+    s = " ".join(s.split())
+    if not s or "=>" in s or _C_NO_STORAGE.match(s):
+        return [], True
+    if "virtual" in s.split():
+        return [], False
+
+    # Nested type definitions: a declarator after '}' is a field; an anonymous
+    # struct or union adds its own members to this layout, which is not read.
+    if re.match(r"(?:struct|union|enum|class)\b[^{]*\{", s):
+        tail = re.search(r"\}\s*\**\s*([A-Za-z_]\w*)\s*(?:\[\s*\w*\s*\])?$", s)
+        if tail:
+            return [Field(tail.group(1), None, False)], True
+        return [], bool(re.match(r"(?:struct|union|enum|class)\s+\w+", s)) or s.startswith("enum")
+
+    # Declarators, with default initializers dropped at depth 0: int x = 5, y{6}.
+    parts = [re.sub(r"(?<=[\w\]])\s*\{[^{}]*\}$", "", (_split_members(p, "=") or [p])[0])
+             for p in _split_members(s, ",")]
+    if not parts:
+        return [], True
+
+    # Parentheses: a function pointer is a field; a method has no storage; a
+    # macro (or a std::function<...> member) may hide one, so it is not read.
+    if any("(" in p for p in parts):
+        fp = re.match(r"^[^(]*\(\s*\*\s*(\w+)\s*\)", parts[0])
+        macro = _C_MACRO_FIELD.match(parts[0])
+        if fp:
+            return [Field(fp.group(1), None, False)], True
+        if macro:
+            return [Field(macro.group("name"), None, False)], False
+        is_macro_call = re.match(r"[A-Z_][A-Z0-9_]*\s*\(", parts[0]) is not None
+        return [], bool(_C_METHOD_END.search(parts[-1])) and not is_macro_call
+    if any("{" in p for p in parts):
+        return [], False
+
+    # Plain declarators sharing one type: type name[N] : bits, *name2, ...
+    head = re.match(r"^(?P<type>.*?)\b(?P<name>[A-Za-z_]\w*)\s*(?:\[\s*(?P<arr>\w*)\s*\])?\s*(?::\s*(?P<bits>\d+))?\s*$",
+                    parts[0])
+    if not head or not head.group("type").strip():
+        return [], False
+    out = []
+    for i, part in enumerate(parts):
+        m = head if i == 0 else re.match(r"^\s*\**\s*(?P<name>[A-Za-z_]\w*)\s*(?:\[\s*(?P<arr>\w*)\s*\])?"
+                                         r"\s*(?::\s*(?P<bits>\d+))?\s*$", part)
+        if not m:
+            return out, False
+        if m.group("bits"):
+            out.append(Field(m.group("name"), int(m.group("bits")), True))
+            continue
+        bits = type_bits(head.group("type") + ("*" if "*" in part else ""), family, packed)
+        arr = m.group("arr")
+        if arr is not None:
+            bits = bits * int(arr) if bits and arr.isdigit() else None
+        out.append(Field(m.group("name"), bits, False))
+    return out, True
+
+
+def _members(body, family, packed):
+    """Return (fields, exact) for the masked body of a brace-delimited struct."""
+    fields, exact = [], True
+
+    # C family: preprocessor lines leave the body; an #if makes the layout
+    # depend on the build, so the struct cannot be exact.
+    if family in ("c", "cs"):
+        exact = not _C_CONDITIONAL.search(body)
+        body = _drop_bodies(_C_DIRECTIVE.sub("", body))
+        if family == "cs":
+            body = re.sub(r"\{\s*(?:\w+\s+)?(?:get|set|init)\b[^{}]*\}", ";", body)
+        for stmt in _split_members(body, ";"):
+            got, understood = _c_fields(stmt, family, packed)
+            fields += got
+            exact = exact and understood
+        return fields, exact
+
+    # Rust and Zig: name: type, one per line or comma; attributes and
+    # methods carry no storage.
+    if family in ("rs", "zig"):
+        for stmt in _split_members(body, ",\n"):
+            if re.match(r"#!?\[[^\]]*\]$", stmt) or re.match(r"(?:pub(?:\([^)]*\))?\s+)?(?:fn|const|var|comptime)\b",
+                                                              stmt):
+                continue
+            f = re.match(r"^(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?(?P<name>[A-Za-z_]\w*)\s*:\s*(?P<type>[^=]+?)"
+                         r"\s*(?:=.*)?$", stmt)
+            if f:
+                fields.append(Field(f.group("name"), type_bits(f.group("type"), family, packed), False))
+            else:
+                exact = False
+        return fields, exact
+
+    # Go: names type `tag`, or an embedded type whose name is the field's.
+    if family == "go":
+        for stmt in _split_members(body, ";\n"):
+            f = re.match(r"^(?P<names>[A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)\s+(?P<type>[^\s\"]+)", stmt)
+            embedded = re.match(r"^\*?(?:[A-Za-z_]\w*\.)?(?P<name>[A-Za-z_]\w*)(?:\s*\"\")?$", stmt)
+            if f:
+                for fname in f.group("names").split(","):
+                    fields.append(Field(fname.strip(), type_bits(f.group("type"), family, packed), False))
+            elif embedded:
+                fields.append(Field(embedded.group("name"), None, False))
+            else:
+                exact = False
+        return fields, exact
+
+    # Swift: stored properties are var/let; everything else has no storage.
+    for stmt in _split_members(body, ";\n"):
+        f = re.match(r"^(?:@\w+(?:\([^)]*\))?\s+)*(?:\w+\s+)*(?:var|let)\s+(?P<name>\w+)\s*:\s*(?P<type>[\w.]+)\s*$", stmt)
+        if f:
+            fields.append(Field(f.group("name"), type_bits(f.group("type"), family, packed), False))
+        elif re.match(r"^(?:@\w+(?:\([^)]*\))?\s+)*(?:\w+\s+)*(?:var|let)\b", stmt):
+            exact = False
+    return fields, exact
 
 
 def structs(lines, family):
@@ -427,10 +669,13 @@ def structs(lines, family):
             j += 1
         body = code[open_at + 1:j]
 
-        # Name, typedef alias and layout markers.
+        # Name, typedef alias, base classes and layout markers.
+        inherits = False
         if family == "c":
-            words = [w for w in re.findall(r"[A-Za-z_]\w*", m.group("head"))
-                     if w not in ("__attribute__", "__packed__", "packed", "aligned", "__aligned__")]
+            head = re.split(r"(?<!:):(?!:)", _C_ATTR.sub(" ", m.group("head")), maxsplit=1)
+            inherits = len(head) > 1
+            words = [w for w in re.findall(r"[A-Za-z_]\w*", head[0])
+                     if w not in ("__attribute__", "__packed__", "packed", "aligned", "__aligned__", "final")]
             name = words[-1] if words else ""
             alias = re.match(r"\s*\**\s*([A-Za-z_]\w*)\s*[;,]", code[j + 1:j + 200])
             aliases = [alias.group(1)] if alias else []
@@ -439,29 +684,9 @@ def structs(lines, family):
         line_no = line_of(m.start())
         above = "\n".join(line.code for line in lines[max(0, line_no - 4):line_no])
         packed = ("packed" in m.group(0) or bool(m.groupdict().get("mod")) or bool(_MARKER_ABOVE.search(above)))
-
-        # Fields, one member statement at a time.
-        fields = []
-        if family in ("c", "cs"):
-            for stmt in _split_members(body, ";"):
-                fields += _c_fields(stmt, family, packed)
-        elif family in ("rs", "zig"):
-            for stmt in _split_members(body, ",\n"):
-                f = re.match(r"^(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?(?P<name>[A-Za-z_]\w*)\s*:\s*(?P<type>[^=]+?)"
-                             r"\s*(?:=.*)?$", stmt)
-                if f and not re.match(r"(?:pub\s+)?(?:fn|const|var)\b", stmt):
-                    fields.append(Field(f.group("name"), type_bits(f.group("type"), family, packed), False))
-        elif family == "go":
-            for stmt in _split_members(body, ";\n"):
-                f = re.match(r"^(?P<names>[A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)\s+(?P<type>[^\s\"]+)", stmt)
-                for fname in (f.group("names").split(",") if f else []):
-                    fields.append(Field(fname.strip(), type_bits(f.group("type"), family, packed), False))
-        else:
-            for stmt in _split_members(body, ";\n"):
-                f = re.match(r"^(?:\w+\s+)*(?:var|let)\s+(?P<name>\w+)\s*:\s*(?P<type>[\w.]+)\s*$", stmt)
-                if f:
-                    fields.append(Field(f.group("name"), type_bits(f.group("type"), family, packed), False))
-        out.append(Struct(name, aliases, line_no, line_of(open_at), line_of(j), fields, packed))
+        fields, exact = _members(body, family, packed)
+        out.append(Struct(name, aliases, line_no, line_of(open_at), line_of(j), fields, packed,
+                          exact and not inherits))
     return out
 
 
@@ -470,6 +695,8 @@ def _py_structs(lines):
 
     Why: these structs are classes delimited by indentation with fields in a
     list of tuples, so they share nothing with the brace walk in structs().
+    A _fields_ that is not one literal list, or an _anonymous_ member, makes
+    the struct inexact.
     """
     out = []
     for i, line in enumerate(lines):
@@ -486,13 +713,18 @@ def _py_structs(lines):
         text = "\n".join(l.raw for l in lines[i + 1:last + 1])
         fields = []
         for f in _PY_FIELD.finditer(text):
+            t = re.sub(r"^ctypes\.", "", " ".join(f.group("type").split()))
+            arr = re.fullmatch(r"(?:ctypes\.)?(c_\w+)\s*\*\s*(\d+)", t)
             if f.group("bits"):
                 fields.append(Field(f.group("name"), int(f.group("bits")), True))
+            elif arr:
+                bits = type_bits(arr.group(1), "py")
+                fields.append(Field(f.group("name"), bits * int(arr.group(2)) if bits else None, False))
             else:
-                bits = type_bits(f.group("type"), "py")
-                fields.append(Field(f.group("name"), bits * int(f.group("arr")) if bits and f.group("arr") else
-                                    (None if f.group("arr") else bits), False))
-        out.append(Struct(m.group("head"), [], i + 1, i + 2, last + 1, fields, True))
+                fields.append(Field(f.group("name"), type_bits(t, "py"), False))
+        exact = re.search(r"\b_fields_\s*=\s*\[", text) is not None \
+            and not re.search(r"\b_fields_\s*(?:\+=|=\s*\[[^\]]*\]\s*\+)|\b_anonymous_\b", text)
+        out.append(Struct(m.group("head"), [], i + 1, i + 2, last + 1, fields, True, exact))
     return out
 
 
@@ -546,21 +778,29 @@ def resolve_base(root, base):
     return base if git(["rev-parse", "--verify", "-q", base + "^{commit}"], root) else EMPTY_TREE
 
 
-def changed_files(root, base):
-    """List (relative path, is_new) for code files that differ from `base` or are untracked.
+# One file the session changed, as the Stop gate hands it to each check: rel
+# (path from the repository root, forward slashes), path (absolute), text
+# (current content), old (content at the baseline, '' when new), new (no
+# baseline version) and added (1-based line numbers new or changed since it).
+Change = namedtuple("Change", "rel path text old new added")
 
+
+def changed_files(root, base, keep=family_of):
+    """List (relative path, is_new) for files that differ from `base` or are untracked.
+
+    Only paths for which keep(path) is true are listed (default: code files).
     is_new is True when the file has no version in `base`, so every one of
     its lines counts as added. Deleted files are skipped.
     """
     out = []
     tracked = git(["diff", "--name-only", "--diff-filter=AMR", base, "--"], root) or ""
     for rel in tracked.splitlines():
-        if family_of(rel) and os.path.isfile(os.path.join(root, rel)):
+        if keep(rel) and os.path.isfile(os.path.join(root, rel)):
             new = base == EMPTY_TREE or git(["cat-file", "-e", "%s:%s" % (base, rel)], root) is None
             out.append((rel, new))
     untracked = git(["ls-files", "--others", "--exclude-standard"], root) or ""
     for rel in untracked.splitlines():
-        if family_of(rel) and os.path.isfile(os.path.join(root, rel)):
+        if keep(rel) and os.path.isfile(os.path.join(root, rel)):
             out.append((rel, True))
     return out
 
@@ -594,6 +834,35 @@ def hook_input():
     except ValueError:
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def edit_lines(data):
+    """Return (path, text, lines) for the Edit, MultiEdit or Write described by hook payload `data`.
+
+    `lines` holds the 1-based line numbers this call wrote: every line for a
+    Write; each occurrence of each new_string (at most 50 per edit) for Edit
+    and MultiEdit. Returns None when the payload names no readable file.
+    Why judge only these lines: the PostToolUse level must stay silent about
+    everything the edit did not write (see the design notes above).
+    """
+    tool_input = data.get("tool_input") or {}
+    if not tool_input.get("file_path"):
+        return None
+    path = os.path.abspath(tool_input["file_path"])
+    text = read_text(path)
+    if text is None:
+        return None
+    text = text.replace("\r\n", "\n")
+    edits = [] if "content" in tool_input else (tool_input.get("edits") or [tool_input])
+    lines = set(range(1, text.count("\n") + 2)) if not edits else set()
+    for edit in edits:
+        new = (edit.get("new_string") or "").replace("\r\n", "\n")
+        start, hits = (text.find(new), 0) if new.strip() else (-1, 0)
+        while start >= 0 and hits < 50:
+            first = text.count("\n", 0, start) + 1
+            lines.update(range(first, first + new.count("\n") + 1))
+            start, hits = text.find(new, start + len(new)), hits + 1
+    return path, text, lines
 
 
 def shown(path):

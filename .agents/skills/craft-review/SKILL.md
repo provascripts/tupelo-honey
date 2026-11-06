@@ -21,7 +21,9 @@ bash "${CLAUDE_PLUGIN_ROOT}/bin/craft-debt-scan.sh" --quiet
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/craft-comment-sync.py" --check-diff --base <base-ref>
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/craft-metrics.py" --report <changed code files>
 ```
-`<base-ref>` is `HEAD` for uncommitted work, the merge base for a branch (`git merge-base HEAD main`). Each script prints nothing when clean. Their findings go into the delete-list as they are; never re-derive counts or line numbers by reading. Kinds: debt markers (TODO, NO-TRIGGER, NO-CEILING); ORPHAN, BACKUP, TRIVIAL, VAGUE and DIAGRAM-FIELD/-ORDER/-SIZE (a `[field:size]` diagram that disagrees with its struct); RHYTHM, HELPER, DMOD, NO-DOC, NO-DESIGN, NO-TEACHER and NO-LAYOUT-ASSERT (a physical layout no assertion pins).
+`<base-ref>` is `HEAD` for uncommitted work, the merge base for a branch (`git merge-base HEAD main`). Each script prints nothing when clean. Their findings go into the delete-list as they are; never re-derive counts or line numbers by reading. Kinds, in the Stop gate's two tiers:
+- **Hard findings** (objective; fix them): debt markers (TODO, NO-TRIGGER, NO-CEILING); ORPHAN, BACKUP, TRIVIAL, VAGUE and DIAGRAM-FIELD/-ORDER/-SIZE (a `[field:size]` diagram that disagrees with its struct).
+- **Review signals** (diagnostic; confirm by reading): RHYTHM, HELPER, DMOD, NO-DOC, NO-DESIGN, NO-TEACHER and NO-LAYOUT-ASSERT (a physical layout no assertion pins). A signal becomes a list entry only when the code confirms it; ΔL_cog < 0 and the four helper benefits of AGENTS.md §1 decide, never the number.
 
 ## Phase 2: symbol-to-comment sync
 For every function, struct, field, constant, macro or parameter renamed, removed or changed in meaning by the diff:
@@ -37,7 +39,7 @@ This overrides honey-review's "redundant narration" rule for source comments.
 - **Missing positives are findings too:** a function >= 40 LOC without Guide comments, pointer math or bitfields without a Teacher diagram, a public function without a Function comment, a module without a Design comment, a bug fix without a Why comment. `craft-metrics.py` reports the first four as RHYTHM, NO-TEACHER, NO-DOC and NO-DESIGN; it sees presence only, so read what those comments say and flag the wrong or empty ones.
 
 ## Phase 4: Lever 1 cuts
-Premature abstractions (interface with one implementation, factory for one product), dead code, single-caller helpers < 30 LOC without a `Why:`, shallow modules (D_mod < 15), hand-rolled stdlib, speculative parameters. Never flag input validation, error handling, auth, secrets or failure-path tests as over-engineering.
+Premature abstractions (interface with one implementation, factory for one product), dead code, single-caller helpers < 30 LOC without a `Why:` (unless the helper draws a semantic boundary, owns a resource, removes duplication or is a test seam: then ask for the `Why:` instead of the cut), shallow modules (D_mod < 15, read as a hint), hand-rolled stdlib, speculative parameters. Never flag input validation, error handling, auth, secrets or failure-path tests as over-engineering.
 
 ## Output: the delete-list
 ```text

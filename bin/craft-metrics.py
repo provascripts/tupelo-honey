@@ -5,7 +5,13 @@ Usage:
   craft-metrics.py --report [PATH...]  minified columnar JSON for PATHs (default:
                                        every code file of the git repository, or
                                        under the current directory outside git)
-  craft-metrics.py --gate              Stop hook: judge only what changed since HEAD
+
+The Stop gate (craft-gate.py) runs the same checks on what the session
+changed and shows them as review signals, once per session: a number below
+or above its threshold invites a look, it never decides. The sovereign test
+is AGENTS.md section 1: lower the reader's cognitive load, and keep a helper
+that draws a semantic boundary, owns a resource, removes duplication or is a
+test seam.
 
 Metrics (LOC = non-blank, non-comment lines; test files are exempt from all
 but RHYTHM):
@@ -44,23 +50,17 @@ Java, C#, Kotlin, Swift, Scala, Groovy, Dart, Solidity, PHP, Go, Rust, Zig,
 JS/TS, shell, Perl, R, PowerShell) by matching {}; Ruby, Crystal, Elixir,
 Lua, Julia, Nim, CoffeeScript, OCaml and F# by indentation; the Lisp family
 by matching parentheses. SQL, Haskell, Erlang, Fortran, VB and Tcl get the
-comment checks only. The scripts check presence, never quality.
-
---gate reports each finding once per session (stderr, exit 2) and stays quiet
-while Claude is already continuing because of a Stop hook (stop_hook_active),
-so it cannot loop. Outside git it exits 0: without a baseline it cannot tell
-new code from legacy code. See the design notes in craftlib.py.
+comment checks only. The scripts check presence, never quality. See the
+design notes in craftlib.py.
 """
 
 import argparse
 import ast
 import bisect
-import hashlib
 import json
 import os
 import re
 import sys
-import tempfile
 from collections import Counter, namedtuple
 
 import craftlib as cl
@@ -686,61 +686,35 @@ def report(paths):
     return 0
 
 
-def unseen(session, findings):
-    """Drop findings already reported in this session and remember the new ones.
+def gate_findings(root, changes):
+    """Stop gate: return (key, message) review signals for the code files `changes` lists.
 
-    Keys omit line numbers on purpose: edits shift lines, and the same
-    violation must not come back as a new one.
+    RHYTHM for touched long functions; HELPER and NO-DOC for new functions;
+    DMOD and NO-DESIGN for new modules; NO-TEACHER and NO-LAYOUT-ASSERT for
+    layout-sensitive code the change wrote. Keys omit line numbers, which
+    shift with every edit; craft-gate.py shows each key once per session.
     """
-    if not session:
-        return findings
-    state = os.path.join(tempfile.gettempdir(),
-                         "craft-gate-%s.txt" % hashlib.sha1(session.encode("utf-8")).hexdigest()[:16])
-    try:
-        with open(state, encoding="utf-8") as fh:
-            seen = set(fh.read().splitlines())
-    except OSError:
-        seen = set()
-    fresh = [f for f in findings if f[0] not in seen]
-    try:
-        with open(state, "a", encoding="utf-8") as fh:
-            fh.writelines(key + "\n" for key, _ in fresh)
-    except OSError:
-        pass
-    return fresh
-
-
-def gate():
-    """Stop hook: report new violations in code changed since HEAD; see the module docstring."""
-    data = cl.hook_input()
-    if data.get("stop_hook_active"):
-        return 0
-    root = cl.repo_root(data.get("cwd") or os.getcwd())
-    if not root:
-        return 0
-    base = cl.resolve_base(root, "HEAD")
     findings, helpers = [], []
-    for rel, new in cl.changed_files(root, base):
-        path = os.path.join(root, rel)
-        text = cl.read_text(path)
-        if text is None:
+    for ch in changes:
+        family = cl.family_of(ch.rel)
+        if not family:
             continue
-        lines, funcs = functions(path, text)
-        added = set(range(1, len(lines) + 1)) if new else cl.added_lines(root, base, rel)
-        old = set() if new else {f.name for f in functions(path, cl.baseline_text(root, base, rel))[1]}
+        rel, added, new = ch.rel, ch.added, ch.new
+        lines, funcs = functions(ch.path, ch.text)
+        old = set() if new else {f.name for f in functions(ch.path, ch.old)[1]}
 
         # RHYTHM for touched long functions; HELPER and NO-DOC for new ones.
         for f in funcs:
             loc, gap = body_stats(lines, f)
             if loc >= LONG_FN and gap > GUIDE_EVERY and added.intersection(range(f.start, f.last + 2)):
-                findings.append(("%s|rhythm|%s" % (rel, f.name),
+                findings.append(("metrics|%s|rhythm|%s" % (rel, f.name),
                                  "%s:%d: [RHYTHM] '%s' has %d LOC and %d code lines in a row without a Guide "
-                                 "comment (max %d): add one every 15-25 LOC." % (rel, f.line, f.name, loc, gap,
-                                                                                 GUIDE_EVERY)))
+                                 "comment (signal above %d): title the blocks whose goal the code does not show; "
+                                 "a flat switch or table needs none." % (rel, f.line, f.name, loc, gap, GUIDE_EVERY)))
             if f.name not in old and helper_candidate(f, loc, rel):
                 helpers.append((rel, f, loc))
             if f.name not in old and doc_missing(f, loc, rel):
-                findings.append(("%s|doc|%s" % (rel, f.name),
+                findings.append(("metrics|%s|doc|%s" % (rel, f.name),
                                  "%s:%d: [NO-DOC] public function '%s' has no Function comment: state behavior, "
                                  "parameters, returns, errors, ownership and side effects above it."
                                  % (rel, f.line, f.name)))
@@ -750,26 +724,25 @@ def gate():
             public = sum(f.public for f in funcs)
             total = sum(1 for line in lines if line.code.strip())
             if public >= 2 and total / public < MIN_DMOD:
-                findings.append(("%s|dmod" % rel,
-                                 "%s:1: [DMOD] D_mod %.1f < %d (%d LOC / %d public functions): merge shallow "
-                                 "entry points or hide them behind a narrower interface."
-                                 % (rel, total / public, MIN_DMOD, total, public)))
+                findings.append(("metrics|%s|dmod" % rel,
+                                 "%s:1: [DMOD] D_mod %.1f (%d LOC / %d public functions, signal below %d): look for "
+                                 "shallow entry points to merge or hide behind a narrower interface."
+                                 % (rel, total / public, total, public, MIN_DMOD)))
         if new and design_missing(lines, rel):
-            findings.append(("%s|design" % rel,
+            findings.append(("metrics|%s|design" % rel,
                              "%s:1: [NO-DESIGN] new module without a Design comment at the top: problem, data "
                              "layout, invariants, known limitations, or a pointer to the module's Design comment."
                              % rel))
 
         # NO-TEACHER and NO-LAYOUT-ASSERT for layout-sensitive code this change wrote.
-        family = cl.family_of(rel)
         layout = layout_unexplained(lines, family, added)
         if layout:
-            findings.append(("%s|teacher" % rel,
+            findings.append(("metrics|%s|teacher" % rel,
                              "%s:%d: [NO-TEACHER] layout-sensitive code (%s) without a Teacher diagram nearby: add "
                              "a [field:size] strip, a byte-offset table or a -> chain that matches the code."
                              % (rel, layout[0], layout[1])))
-        for line_no, name, evidence in layout_unasserted(lines, family, added, assertion_search(root, [path])):
-            findings.append(("%s|layout|%s" % (rel, name),
+        for line_no, name, evidence in layout_unasserted(lines, family, added, assertion_search(root, [ch.path])):
+            findings.append(("metrics|%s|layout|%s" % (rel, name),
                              "%s:%d: [NO-LAYOUT-ASSERT] struct '%s' has a physical layout (%s) but no size or "
                              "offset assertion: add static_assert(sizeof/offsetof) or its language form (see "
                              "craft-code) so the compiler checks the diagram." % (rel, line_no, name, evidence)))
@@ -777,21 +750,18 @@ def gate():
     counts = reference_counts(root, {f.name for _, f, _ in helpers}, [])
     for rel, f, loc in helpers:
         if counts[f.name] == 2:
-            findings.append(("%s|helper|%s" % (rel, f.name),
+            findings.append(("metrics|%s|helper|%s" % (rel, f.name),
                              "%s:%d: [HELPER] '%s' (%d LOC) has a single caller: inline it under a Guide comment, "
-                             "or justify it with a 'Why:' comment (boundary, ownership, duplication, test seam)."
-                             % (rel, f.line, f.name, loc)))
-    return cl.report([msg for _, msg in unseen(data.get("session_id"), findings)], hook=True)
+                             "unless it draws a boundary, owns a resource, removes duplication or is a test seam "
+                             "(then say which in a 'Why:' comment)." % (rel, f.line, f.name, loc)))
+    return findings
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--report", action="store_true", help="print metrics as columnar JSON")
-    mode.add_argument("--gate", action="store_true", help="Stop hook mode: read the hook JSON on stdin")
+    parser.add_argument("--report", action="store_true", required=True, help="print metrics as columnar JSON")
     parser.add_argument("paths", nargs="*", help="files or directories for --report")
-    args = parser.parse_args()
-    return gate() if args.gate else report(args.paths)
+    return report(parser.parse_args().paths)
 
 
 if __name__ == "__main__":
