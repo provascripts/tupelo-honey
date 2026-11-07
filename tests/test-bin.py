@@ -1358,14 +1358,26 @@ class ModeTest(unittest.TestCase):
 
 
 class LayoutTest(unittest.TestCase):
-    COMPONENTS = (".claude-plugin", ".cursor", ".agents", "skills", "agents", "commands", "hooks", "bin",
-                  "scripts", "tests")
+    COMPONENTS = (".claude-plugin", ".cursor", ".agents", "skills", "agents", "hooks", "bin", "scripts", "tests")
 
-    def test_manifest_alone_in_claude_plugin_and_components_at_root(self):
-        self.assertEqual(os.listdir(os.path.join(ROOT, ".claude-plugin")), ["plugin.json"])
-        self.assertEqual(json.loads(read(".claude-plugin/plugin.json"))["name"], "tupelo-honey")
-        for name in ("skills", "agents", "commands", "hooks", "bin"):
+    def test_manifests_in_claude_plugin_and_components_at_root(self):
+        self.assertEqual(sorted(os.listdir(os.path.join(ROOT, ".claude-plugin"))), ["marketplace.json", "plugin.json"])
+        plugin = json.loads(read(".claude-plugin/plugin.json"))
+        self.assertEqual(plugin["name"], "tupelo-honey")
+        # The repository is its own one-plugin marketplace (README: /plugin
+        # install tupelo-honey@provascripts): the entry must point at this
+        # root and carry the same name and version as plugin.json.
+        market = json.loads(read(".claude-plugin/marketplace.json"))
+        self.assertEqual(market["name"], "provascripts")
+        self.assertEqual([(e["name"], e["source"], e["version"]) for e in market["plugins"]],
+                         [(plugin["name"], "./", plugin["version"])])
+        self.assertEqual(market["metadata"]["version"], plugin["version"])
+        for name in ("skills", "agents", "hooks", "bin"):
             self.assertTrue(os.path.isdir(os.path.join(ROOT, name)), name)
+        # Why no commands/: Claude Code runs a plugin command only with the
+        # plugin prefix (/tupelo-honey:tupelo), a plugin skill by its bare
+        # name too (/tupelo), so the user-facing commands are skills.
+        self.assertFalse(os.path.exists(os.path.join(ROOT, "commands")))
 
     def test_kebab_case_names(self):
         conventional = {"AGENTS.md", "CLAUDE.md", "SKILL.md"}
@@ -1386,8 +1398,9 @@ class LayoutTest(unittest.TestCase):
             self.assertRegex(text, r"\A---\nname: %s\ndescription: " % re.escape(name[:-3]))
             self.assertRegex(text, r"\ntools: [A-Z][\w, ]+\nmodel: \w+\n---\n")
         for name in ("tupelo", "honey"):
-            self.assertRegex(read("commands/%s.md" % name), r"\A---\ndescription: .+\nargument-hint: ")
-        self.assertRegex(read("commands/honey.md"), r"\A---\ndescription: Alias of /tupelo\. ")
+            self.assertRegex(read("skills/%s/SKILL.md" % name),
+                             r"\A---\nname: %s\ndescription: .+\nargument-hint: .+\n" % name)
+        self.assertRegex(read("skills/honey/SKILL.md"), r"\A---\nname: honey\ndescription: Alias of /tupelo\. ")
 
     def test_hooks_point_at_existing_scripts(self):
         hooks = json.loads(read("hooks/hooks.json"))["hooks"]

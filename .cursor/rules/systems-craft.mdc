@@ -11,7 +11,7 @@ Write less code, waste zero chat tokens, and craft source files with the comment
 ## 0. Scope, Precedence & Modes
 - **Scope:** any language. Examples are illustrative: translate them to the language's idiomatic comment/doc syntax.
 - **Priority order:** explicit user request > this file > `honey-for-devs` > repo conventions. Repo and language conventions win on *form* (doc syntax, style guide, file layout); this file governs *what knowledge* comments and docs must carry.
-- **Modes:** `/tupelo [lite|full|ultra|off]` switches the current session (alias `/honey`; prefer `/tupelo` when the Honey plugin, which owns `/honey`, is installed too); `/tupelo default <mode>` persists the default (initially `full`) via `bin/craft-mode.sh`, re-injected at every session start; `/tupelo` alone returns to it.
+- **Modes:** `/tupelo [lite|full|ultra|off]` switches the current session (alias `/honey`; if the Honey plugin is installed too, a bare `/honey` may run Honey's own skill, so prefer `/tupelo`); `/tupelo default <mode>` persists the default (initially `full`) via `bin/craft-mode.sh`, re-injected at every session start; `/tupelo` alone returns to it.
   - `full`: terse chat (Lever 2); every code rule.
   - `lite`: chat may explain in full sentences; Lever 1 and all comment rules unchanged.
   - `ultra`: answer-only chat and loop reports; dense reading for large read-only files (§6); code comments unchanged.
@@ -117,10 +117,10 @@ Write less code, waste zero chat tokens, and craft source files with the comment
 - Languages: comment checks cover C/C++/Objective-C/CUDA, Java, C#, Kotlin, Swift, Scala, Groovy, Dart, Solidity, PHP, Go, Rust, Zig, JS/TS, Python, shell, Ruby, Perl, R, Elixir, Crystal, Julia, Nim, PowerShell, Lua, SQL, Haskell, Lisps, OCaml, F#, Erlang, Fortran, VB; function metrics all but SQL, Haskell, Erlang, Fortran, VB, Tcl. Other files are skipped, never guessed.
 
 ## 8. This Repository (`tupelo-honey` plugin)
-- Layout: only `plugin.json` inside `.claude-plugin/`; `skills/ agents/ commands/ hooks/ bin/` at the root; kebab-case names; paths via `${CLAUDE_PLUGIN_ROOT}`. `bin/` holds runtime scripts (on the Bash PATH while the plugin is enabled), `scripts/` maintenance tools; shared lexer and design notes in `bin/craftlib.py`.
+- Layout: only `plugin.json` and `marketplace.json` inside `.claude-plugin/` (the repository is its own one-plugin marketplace, `provascripts`; a test keeps both versions equal); `skills/ agents/ hooks/ bin/` at the root, no `commands/` (Claude Code runs a plugin skill by its bare name, `/tupelo`, a plugin command only with the prefix, so `/tupelo` and `/honey` are skills); kebab-case names; paths via `${CLAUDE_PLUGIN_ROOT}`. `bin/` holds runtime scripts (on the Bash PATH while the plugin is enabled), `scripts/` maintenance tools; shared lexer and design notes in `bin/craftlib.py`.
 - Stack: Bash + Python 3.8+ stdlib only; Markdown skills and agents with YAML frontmatter.
 - Test: `python3 tests/test-bin.py` (from Git Bash on Windows). Validate: `claude plugin validate .` Polyglot parser fixtures live in `tests/fixtures/`: each stays clean under every scanner, and the tests derive the faulty variants.
-- Generated mirrors, never edited by hand: `.cursor/rules/systems-craft.mdc` (from this file), `.agents/skills/` (from `skills/`) and `commands/honey.md` (from `commands/tupelo.md`). After editing a source run `bash scripts/sync-mirrors.sh`; the tests fail on drift.
+- Generated mirrors, never edited by hand: `.cursor/rules/systems-craft.mdc` (from this file), `skills/honey/` (from `skills/tupelo/`) and `.agents/skills/` (from `skills/`). After editing a source run `bash scripts/sync-mirrors.sh`; the tests fail on drift.
 
 ## 9. Pre-Finish Checklist & Formatting
 - **Formatting:** follow the language's doc conventions (PEP 257, JSDoc/TSDoc, rustdoc, Javadoc, godoc starting with the symbol name). Start doc comments with a one-line summary, since tooltips and generated docs show it alone. Write plain, warm, direct English, unless the repo's comments use another language.

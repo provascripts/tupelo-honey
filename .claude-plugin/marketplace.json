@@ -1,0 +1,22 @@
+{
+  "name": "provascripts",
+  "owner": {
+    "name": "provascripts",
+    "url": "https://github.com/provascripts"
+  },
+  "metadata": {
+    "description": "tupelo-honey: antirez-style comments, deep modules and verification inspired by SQLite, for Claude Code.",
+    "version": "0.0.3"
+  },
+  "plugins": [
+    {
+      "name": "tupelo-honey",
+      "source": "./",
+      "description": "Standalone: write less code and craft dense source files with antirez's nine comment kinds, deep modules (Ousterhout), Pike/djb simplicity and verification inspired by SQLite (Hipp); zero-token hooks check debt markers, comment drift and layout diagrams.",
+      "version": "0.0.3",
+      "author": { "name": "provascripts" },
+      "license": "MIT",
+      "keywords": ["systems-programming", "antirez", "comments", "deep-modules", "differential-fuzzing", "fault-injection"]
+    }
+  ]
+}

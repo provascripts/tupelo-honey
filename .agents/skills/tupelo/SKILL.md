@@ -1,5 +1,6 @@
 ---
-description: Alias of /tupelo. Set the tupelo-honey mode (lite, full, ultra, off) for this session, or with "default" for every new session.
+name: tupelo
+description: Set the tupelo-honey mode (lite, full, ultra, off) for this session, or with "default" for every new session.
 argument-hint: "[lite|full|ultra|off] | default [lite|full|ultra|off]"
 allowed-tools: Bash(bash:*)
 disable-model-invocation: true
@@ -9,7 +10,7 @@ Mode: !`bash "${CLAUDE_PLUGIN_ROOT}/bin/craft-mode.sh" command "$ARGUMENTS"`
 
 If the line above is missing or not of the form `mode=… scope=… default=…` or `error=…`, run `bash "${CLAUDE_PLUGIN_ROOT}/bin/craft-mode.sh" command "$ARGUMENTS"` once yourself (outside Claude Code the script is `bin/craft-mode.sh` at the plugin root).
 
-The forms (the alias of this command takes the same arguments):
+The forms (`/honey` is the same command and takes the same arguments):
 - `/tupelo` — back to the default mode in this session.
 - `/tupelo <mode>` — this session only; the default is unchanged.
 - `/tupelo default <mode>` — save `<mode>` as the default for new sessions and apply it now.
