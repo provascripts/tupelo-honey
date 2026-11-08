@@ -1,0 +1,1201 @@
+{
+ "plugin": "0.0.3",
+ "repos": {
+  "app": {
+   "cli": {
+    "debt": {
+     "exit": 1,
+     "findings": 1
+    },
+    "metrics": {
+     "exit": 0,
+     "findings": 154
+    },
+    "sync": {
+     "exit": 1,
+     "findings": 6
+    }
+   },
+   "coverage": {
+    "functions": 233,
+    "functions_signalled": 0.082,
+    "long_functions": 5,
+    "long_rhythm": 1.0,
+    "modules": 160,
+    "modules_signalled": 0.6
+   },
+   "files": 241,
+   "hard": {
+    "BACKUP": 4,
+    "TODO": 1,
+    "TRIVIAL": 2
+   },
+   "inexact_files": [],
+   "lines": 21960,
+   "path": "",
+   "per_file": {
+    "backend/app/alembic/env.py": {
+     "hard:BACKUP": 3,
+     "soft:DMOD": 1,
+     "soft:NO-DESIGN": 1
+    },
+    "backend/app/alembic/versions/1a31ce608336_add_cascade_delete_relationships.py": {
+     "soft:DMOD": 1,
+     "soft:NO-DOC": 2
+    },
+    "backend/app/alembic/versions/9c0a54914c78_add_max_length_for_string_varchar_.py": {
+     "soft:NO-DOC": 2
+    },
+    "backend/app/alembic/versions/d98dd8ec85a3_edit_replace_id_integers_in_all_models_.py": {
+     "soft:NO-DOC": 2
+    },
+    "backend/app/alembic/versions/e2412789c190_initialize_models.py": {
+     "soft:NO-DOC": 2
+    },
+    "backend/app/alembic/versions/fe56fa70289e_add_created_at_to_user_and_item.py": {
+     "soft:DMOD": 1
+    },
+    "backend/app/api/deps.py": {
+     "soft:NO-DESIGN": 1
+    },
+    "backend/app/api/routes/items.py": {
+     "soft:NO-DESIGN": 1
+    },
+    "backend/app/api/routes/login.py": {
+     "soft:NO-DESIGN": 1
+    },
+    "backend/app/api/routes/private.py": {
+     "soft:NO-DESIGN": 1
+    },
+    "backend/app/api/routes/users.py": {
+     "soft:NO-DESIGN": 1
+    },
+    "backend/app/api/routes/utils.py": {
+     "soft:DMOD": 1,
+     "soft:NO-DESIGN": 1
+    },
+    "backend/app/core/config.py": {
+     "soft:NO-DESIGN": 1
+    },
+    "backend/app/core/db.py": {
+     "soft:NO-DOC": 1
+    },
+    "backend/app/core/security.py": {
+     "soft:DMOD": 1,
+     "soft:NO-DESIGN": 1,
+     "soft:NO-DOC": 1
+    },
+    "backend/app/crud.py": {
+     "soft:DMOD": 1,
+     "soft:NO-DESIGN": 1,
+     "soft:NO-DOC": 5
+    },
+    "backend/app/initial_data.py": {
+     "soft:DMOD": 1
+    },
+    "backend/app/main.py": {
+     "soft:NO-DESIGN": 1
+    },
+    "backend/app/models.py": {
+     "soft:NO-DESIGN": 1
+    },
+    "backend/app/utils.py": {
+     "soft:NO-DESIGN": 1,
+     "soft:NO-DOC": 7
+    },
+    "backend/tests/api/routes/test_users.py": {
+     "hard:BACKUP": 1
+    },
+    "compose.override.yml": {
+     "hard:TODO": 1
+    },
+    "frontend/playwright.config.ts": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/client/client/utils.gen.ts": {
+     "soft:NO-DOC": 3
+    },
+    "frontend/src/client/core/params.gen.ts": {
+     "soft:HELPER": 1,
+     "soft:NO-DOC": 1,
+     "soft:RHYTHM": 1
+    },
+    "frontend/src/client/core/pathSerializer.gen.ts": {
+     "soft:NO-DOC": 3
+    },
+    "frontend/src/client/core/queryKeySerializer.gen.ts": {
+     "soft:HELPER": 2
+    },
+    "frontend/src/client/core/serverSentEvents.gen.ts": {
+     "soft:RHYTHM": 1
+    },
+    "frontend/src/client/sdk.gen.ts": {
+     "soft:DMOD": 1
+    },
+    "frontend/src/components/Admin/AddUser.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/Admin/DeleteUser.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/Admin/EditUser.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/Admin/UserActionsMenu.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/Admin/columns.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/Common/Appearance.tsx": {
+     "soft:NO-DESIGN": 1,
+     "soft:NO-DOC": 2,
+     "soft:RHYTHM": 1
+    },
+    "frontend/src/components/Common/AuthLayout.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/Common/DataTable.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/Common/ErrorComponent.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/Common/Footer.tsx": {
+     "soft:NO-DESIGN": 1,
+     "soft:NO-DOC": 1
+    },
+    "frontend/src/components/Common/Logo.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/Common/NotFound.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/Items/AddItem.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/Items/DeleteItem.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/Items/EditItem.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/Items/ItemActionsMenu.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/Items/columns.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/Pending/PendingItems.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/Pending/PendingUsers.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/Sidebar/AppSidebar.tsx": {
+     "soft:NO-DESIGN": 1,
+     "soft:NO-DOC": 1
+    },
+    "frontend/src/components/Sidebar/Main.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/Sidebar/User.tsx": {
+     "soft:HELPER": 1,
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/UserSettings/ChangePassword.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/UserSettings/DeleteConfirmation.tsx": {
+     "soft:NO-DESIGN": 1,
+     "soft:RHYTHM": 1
+    },
+    "frontend/src/components/UserSettings/UserInformation.tsx": {
+     "soft:HELPER": 1,
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/theme-provider.tsx": {
+     "soft:NO-DESIGN": 1,
+     "soft:NO-DOC": 1
+    },
+    "frontend/src/components/ui/alert.tsx": {
+     "soft:HELPER": 1,
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/ui/avatar.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/ui/badge.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/ui/button-group.tsx": {
+     "soft:HELPER": 1,
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/ui/button.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/ui/card.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/ui/checkbox.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/ui/dialog.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/ui/dropdown-menu.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/ui/form.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/ui/label.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/ui/loading-button.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/ui/pagination.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/ui/password-input.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/ui/select.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/ui/separator.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/ui/sheet.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/ui/sidebar.tsx": {
+     "soft:HELPER": 1,
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/ui/sonner.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/ui/table.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/ui/tabs.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/components/ui/tooltip.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/hooks/useAuth.ts": {
+     "soft:NO-DESIGN": 1,
+     "soft:RHYTHM": 1
+    },
+    "frontend/src/hooks/useCopyToClipboard.ts": {
+     "soft:NO-DESIGN": 1,
+     "soft:NO-DOC": 1
+    },
+    "frontend/src/hooks/useMobile.ts": {
+     "soft:NO-DOC": 1
+    },
+    "frontend/src/main.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/routes/_layout.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/routes/_layout/admin.tsx": {
+     "soft:HELPER": 3,
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/routes/_layout/index.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/routes/_layout/items.tsx": {
+     "soft:HELPER": 2,
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/routes/_layout/settings.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/routes/login.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/routes/recover-password.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/routes/reset-password.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/routes/signup.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "frontend/src/utils.ts": {
+     "soft:HELPER": 1,
+     "soft:NO-DESIGN": 1,
+     "soft:NO-DOC": 1
+    },
+    "frontend/tests/reset-password.spec.ts": {
+     "hard:TRIVIAL": 2
+    },
+    "frontend/vite.config.ts": {
+     "soft:NO-DESIGN": 1
+    },
+    "packages/react-email/emails/new_account.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "packages/react-email/emails/reset_password.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "packages/react-email/ui/Button.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "packages/react-email/ui/Callout.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "packages/react-email/ui/Layout.tsx": {
+     "soft:NO-DESIGN": 1
+    },
+    "scripts/prepare_release.py": {
+     "soft:NO-DOC": 9
+    }
+   },
+   "plugin": "0.0.3",
+   "rhythm_ok": 0.0,
+   "soft": {
+    "DMOD": 8,
+    "HELPER": 14,
+    "NO-DESIGN": 81,
+    "NO-DOC": 46,
+    "RHYTHM": 5
+   }
+  },
+  "rax": {
+   "cli": {
+    "debt": {
+     "exit": 0,
+     "findings": 0
+    },
+    "metrics": {
+     "exit": 0,
+     "findings": 15
+    },
+    "sync": {
+     "exit": 1,
+     "findings": 3
+    }
+   },
+   "coverage": {
+    "functions": 79,
+    "functions_signalled": 0.089,
+    "long_functions": 12,
+    "long_rhythm": 0.5,
+    "modules": 9,
+    "modules_signalled": 0.667
+   },
+   "files": 12,
+   "hard": {
+    "TRIVIAL": 1,
+    "VAGUE": 2
+   },
+   "inexact_files": [],
+   "lines": 3735,
+   "path": "",
+   "per_file": {
+    "crc16.c": {
+     "soft:NO-DOC": 1
+    },
+    "rax-oom-test.c": {
+     "soft:RHYTHM": 1
+    },
+    "rax-test.c": {
+     "soft:RHYTHM": 4
+    },
+    "rax.c": {
+     "hard:TRIVIAL": 1,
+     "hard:VAGUE": 2,
+     "soft:HELPER": 1,
+     "soft:NO-TEACHER": 1,
+     "soft:RHYTHM": 1
+    },
+    "rax_oom_malloc.h": {
+     "soft:NO-DOC": 2
+    },
+    "rc4rand.c": {
+     "soft:DMOD": 1,
+     "soft:NO-DOC": 3
+    }
+   },
+   "plugin": "0.0.3",
+   "rhythm_ok": 0.5,
+   "soft": {
+    "DMOD": 1,
+    "HELPER": 1,
+    "NO-DOC": 6,
+    "NO-TEACHER": 1,
+    "RHYTHM": 6
+   }
+  },
+  "redis": {
+   "cli": {
+    "debt": {
+     "exit": 1,
+     "findings": 19
+    },
+    "metrics": {
+     "exit": 0,
+     "findings": 1278
+    },
+    "sync": {
+     "exit": 1,
+     "findings": 612
+    }
+   },
+   "coverage": {
+    "functions": 6676,
+    "functions_signalled": 0.058,
+    "long_functions": 661,
+    "long_rhythm": 0.49,
+    "modules": 229,
+    "modules_signalled": 0.603
+   },
+   "files": 713,
+   "hard": {
+    "BACKUP": 7,
+    "TODO": 19,
+    "TRIVIAL": 587,
+    "VAGUE": 18
+   },
+   "inexact_files": [],
+   "lines": 275685,
+   "path": "src/",
+   "per_file": {
+    "src/acl.c": {
+     "hard:TRIVIAL": 2,
+     "soft:NO-DOC": 5,
+     "soft:RHYTHM": 3
+    },
+    "src/adlist.c": {
+     "soft:DMOD": 1,
+     "soft:NO-DOC": 1
+    },
+    "src/ae.c": {
+     "soft:NO-DOC": 9
+    },
+    "src/ae.h": {
+     "hard:TRIVIAL": 1
+    },
+    "src/ae_evport.c": {
+     "hard:TRIVIAL": 2
+    },
+    "src/anet.c": {
+     "soft:NO-DOC": 7,
+     "soft:RHYTHM": 1
+    },
+    "src/aof.c": {
+     "hard:TRIVIAL": 4,
+     "soft:NO-DOC": 20,
+     "soft:RHYTHM": 8
+    },
+    "src/atomicvar.h": {
+     "hard:BACKUP": 1,
+     "hard:TRIVIAL": 1
+    },
+    "src/bio.c": {
+     "soft:NO-DOC": 8,
+     "soft:NO-TEACHER": 1,
+     "soft:RHYTHM": 1
+    },
+    "src/bio.h": {
+     "hard:TRIVIAL": 1
+    },
+    "src/bitops.c": {
+     "hard:TRIVIAL": 1,
+     "soft:NO-DOC": 4,
+     "soft:RHYTHM": 8
+    },
+    "src/bitroar.c": {
+     "soft:NO-DOC": 16,
+     "soft:NO-TEACHER": 1,
+     "soft:RHYTHM": 7
+    },
+    "src/bless.c": {
+     "hard:TRIVIAL": 1
+    },
+    "src/blocked.c": {
+     "hard:TRIVIAL": 1,
+     "soft:NO-DOC": 2
+    },
+    "src/call_reply.c": {
+     "hard:TRIVIAL": 1,
+     "soft:NO-DOC": 1
+    },
+    "src/childinfo.c": {
+     "hard:TRIVIAL": 1
+    },
+    "src/chk.c": {
+     "hard:TRIVIAL": 3,
+     "soft:NO-DOC": 4,
+     "soft:RHYTHM": 2
+    },
+    "src/cli_commands.h": {
+     "soft:NO-TEACHER": 1
+    },
+    "src/cli_common.c": {
+     "soft:NO-DOC": 2,
+     "soft:RHYTHM": 1
+    },
+    "src/cli_common.h": {
+     "soft:NO-DESIGN": 1
+    },
+    "src/client_comp.c": {
+     "soft:NO-DESIGN": 1,
+     "soft:NO-DOC": 10
+    },
+    "src/cluster.c": {
+     "hard:TRIVIAL": 3,
+     "soft:NO-DOC": 13,
+     "soft:NO-TEACHER": 1,
+     "soft:RHYTHM": 4
+    },
+    "src/cluster.h": {
+     "hard:TRIVIAL": 7,
+     "soft:NO-TEACHER": 1
+    },
+    "src/cluster_asm.c": {
+     "hard:TODO": 1,
+     "hard:TRIVIAL": 33,
+     "soft:NO-DOC": 27,
+     "soft:RHYTHM": 2
+    },
+    "src/cluster_legacy.c": {
+     "hard:TODO": 1,
+     "hard:TRIVIAL": 11,
+     "soft:NO-DOC": 38,
+     "soft:NO-TEACHER": 1,
+     "soft:RHYTHM": 7
+    },
+    "src/cluster_legacy.h": {
+     "hard:TRIVIAL": 14,
+     "soft:NO-TEACHER": 1
+    },
+    "src/cluster_slot_stats.c": {
+     "soft:NO-DOC": 2,
+     "soft:RHYTHM": 1
+    },
+    "src/cluster_slot_stats.h": {
+     "hard:TRIVIAL": 1
+    },
+    "src/config.c": {
+     "hard:TODO": 1,
+     "hard:TRIVIAL": 13,
+     "soft:NO-DOC": 30,
+     "soft:RHYTHM": 4
+    },
+    "src/connection.c": {
+     "hard:TRIVIAL": 1,
+     "soft:DMOD": 1,
+     "soft:NO-DOC": 6
+    },
+    "src/connection.h": {
+     "hard:TRIVIAL": 4
+    },
+    "src/crc16.c": {
+     "soft:NO-DOC": 1
+    },
+    "src/crc64.c": {
+     "soft:NO-DOC": 3,
+     "soft:RHYTHM": 1
+    },
+    "src/crccombine.c": {
+     "soft:NO-DESIGN": 1,
+     "soft:NO-DOC": 3,
+     "soft:RHYTHM": 1
+    },
+    "src/crcspeed.c": {
+     "soft:NO-DOC": 5
+    },
+    "src/db.c": {
+     "hard:TODO": 3,
+     "hard:TRIVIAL": 4,
+     "soft:NO-DOC": 17,
+     "soft:RHYTHM": 4
+    },
+    "src/debug.c": {
+     "hard:TRIVIAL": 3,
+     "soft:NO-DOC": 26,
+     "soft:RHYTHM": 4
+    },
+    "src/defrag.c": {
+     "hard:TRIVIAL": 1,
+     "soft:NO-DOC": 23,
+     "soft:RHYTHM": 2
+    },
+    "src/dict.c": {
+     "hard:TRIVIAL": 11,
+     "soft:NO-DOC": 32
+    },
+    "src/dict.h": {
+     "hard:TRIVIAL": 1,
+     "hard:VAGUE": 1,
+     "soft:NO-TEACHER": 1
+    },
+    "src/ebuckets.c": {
+     "hard:TODO": 1,
+     "hard:TRIVIAL": 12,
+     "soft:NO-DOC": 8,
+     "soft:RHYTHM": 4
+    },
+    "src/ebuckets.h": {
+     "hard:TODO": 1,
+     "hard:TRIVIAL": 3,
+     "soft:NO-TEACHER": 1
+    },
+    "src/endianconv.c": {
+     "soft:DMOD": 1,
+     "soft:NO-DOC": 1
+    },
+    "src/estore.c": {
+     "hard:TRIVIAL": 3,
+     "soft:NO-DOC": 1
+    },
+    "src/eval.c": {
+     "hard:TRIVIAL": 2,
+     "soft:NO-DOC": 16,
+     "soft:RHYTHM": 4
+    },
+    "src/eventnotifier.c": {
+     "soft:DMOD": 1,
+     "soft:NO-DOC": 6
+    },
+    "src/evict.c": {
+     "hard:TRIVIAL": 1,
+     "soft:NO-DOC": 1
+    },
+    "src/expire.c": {
+     "hard:TRIVIAL": 3,
+     "soft:NO-DOC": 2
+    },
+    "src/fast_float_strtod.c": {
+     "hard:TRIVIAL": 4,
+     "soft:NO-DOC": 1,
+     "soft:NO-LAYOUT-ASSERT": 1,
+     "soft:NO-TEACHER": 1,
+     "soft:RHYTHM": 1
+    },
+    "src/function_lua.c": {
+     "hard:TRIVIAL": 1,
+     "soft:RHYTHM": 1
+    },
+    "src/functions.c": {
+     "hard:TRIVIAL": 6,
+     "soft:NO-DOC": 3,
+     "soft:RHYTHM": 4
+    },
+    "src/functions.h": {
+     "hard:TRIVIAL": 3
+    },
+    "src/fwtree.c": {
+     "hard:TRIVIAL": 13,
+     "soft:NO-DOC": 2,
+     "soft:RHYTHM": 1
+    },
+    "src/gcra.c": {
+     "soft:NO-DOC": 1,
+     "soft:RHYTHM": 1
+    },
+    "src/geo.c": {
+     "hard:TRIVIAL": 1,
+     "soft:RHYTHM": 1
+    },
+    "src/geohash.c": {
+     "soft:NO-DOC": 8
+    },
+    "src/geohash_helper.c": {
+     "soft:NO-DOC": 2,
+     "soft:RHYTHM": 1
+    },
+    "src/hash_entry.c": {
+     "hard:TRIVIAL": 3,
+     "soft:NO-DOC": 3,
+     "soft:NO-TEACHER": 1
+    },
+    "src/hash_entry.h": {
+     "hard:TRIVIAL": 2
+    },
+    "src/hotkeys.c": {
+     "soft:NO-DOC": 2,
+     "soft:RHYTHM": 1
+    },
+    "src/hyperloglog.c": {
+     "hard:TRIVIAL": 2,
+     "hard:VAGUE": 1,
+     "soft:NO-DOC": 1,
+     "soft:NO-TEACHER": 1,
+     "soft:RHYTHM": 3
+    },
+    "src/intset.c": {
+     "soft:NO-DOC": 2,
+     "soft:NO-TEACHER": 1,
+     "soft:RHYTHM": 1
+    },
+    "src/intset.h": {
+     "soft:NO-TEACHER": 1
+    },
+    "src/iothread.c": {
+     "hard:TODO": 1,
+     "hard:TRIVIAL": 8,
+     "soft:NO-DOC": 3,
+     "soft:RHYTHM": 1
+    },
+    "src/keymeta.c": {
+     "hard:TRIVIAL": 6,
+     "soft:NO-DOC": 1
+    },
+    "src/keymeta.h": {
+     "hard:TRIVIAL": 2
+    },
+    "src/kvstore.c": {
+     "hard:TRIVIAL": 5,
+     "soft:DMOD": 1,
+     "soft:NO-DOC": 24,
+     "soft:NO-TEACHER": 1,
+     "soft:RHYTHM": 2
+    },
+    "src/kvstore.h": {
+     "hard:TRIVIAL": 1
+    },
+    "src/latency.c": {
+     "hard:TRIVIAL": 4,
+     "soft:NO-DOC": 2,
+     "soft:RHYTHM": 2
+    },
+    "src/lazyfree.c": {
+     "soft:NO-DESIGN": 1
+    },
+    "src/listpack.c": {
+     "soft:NO-DOC": 3,
+     "soft:NO-TEACHER": 1,
+     "soft:RHYTHM": 4
+    },
+    "src/localtime.c": {
+     "hard:TRIVIAL": 1,
+     "soft:NO-DOC": 1
+    },
+    "src/logreqres.c": {
+     "hard:TRIVIAL": 2,
+     "hard:VAGUE": 1,
+     "soft:NO-DOC": 2
+    },
+    "src/lolwut.c": {
+     "soft:DMOD": 1
+    },
+    "src/lolwut5.c": {
+     "soft:NO-DOC": 1
+    },
+    "src/lolwut6.c": {
+     "soft:NO-DOC": 1
+    },
+    "src/lolwut8.c": {
+     "soft:NO-DOC": 1
+    },
+    "src/lzf_c.c": {
+     "soft:RHYTHM": 1
+    },
+    "src/lzf_d.c": {
+     "soft:NO-DOC": 1,
+     "soft:RHYTHM": 1
+    },
+    "src/lzf_d_2.c": {
+     "soft:NO-DOC": 1,
+     "soft:RHYTHM": 2
+    },
+    "src/memory_prefetch.c": {
+     "soft:NO-DOC": 4
+    },
+    "src/memtest.c": {
+     "hard:TRIVIAL": 1,
+     "soft:NO-DOC": 6,
+     "soft:RHYTHM": 1
+    },
+    "src/module.c": {
+     "hard:TRIVIAL": 25,
+     "soft:NO-DOC": 40,
+     "soft:RHYTHM": 17
+    },
+    "src/modules/helloacl.c": {
+     "soft:DMOD": 1
+    },
+    "src/modules/helloblock.c": {
+     "soft:DMOD": 1
+    },
+    "src/modules/hellocluster.c": {
+     "soft:DMOD": 1
+    },
+    "src/modules/hellohook.c": {
+     "soft:NO-DOC": 1
+    },
+    "src/modules/hellotimer.c": {
+     "soft:DMOD": 1
+    },
+    "src/modules/hellotype.c": {
+     "hard:BACKUP": 1,
+     "soft:DMOD": 1,
+     "soft:NO-DOC": 7
+    },
+    "src/modules/helloworld.c": {
+     "soft:RHYTHM": 1
+    },
+    "src/monotonic.c": {
+     "soft:NO-DESIGN": 1,
+     "soft:NO-DOC": 2
+    },
+    "src/mstr.c": {
+     "hard:TRIVIAL": 1,
+     "soft:NO-DOC": 1,
+     "soft:NO-TEACHER": 1,
+     "soft:RHYTHM": 2
+    },
+    "src/mstr.h": {
+     "soft:NO-TEACHER": 1
+    },
+    "src/mt19937-64.c": {
+     "soft:DMOD": 1
+    },
+    "src/multi.c": {
+     "hard:TRIVIAL": 2,
+     "soft:NO-DOC": 7,
+     "soft:RHYTHM": 1
+    },
+    "src/networking.c": {
+     "hard:TRIVIAL": 4,
+     "soft:NO-DOC": 34,
+     "soft:NO-TEACHER": 1,
+     "soft:RHYTHM": 8
+    },
+    "src/object.c": {
+     "hard:TODO": 1,
+     "hard:TRIVIAL": 4,
+     "soft:NO-DOC": 46,
+     "soft:RHYTHM": 3
+    },
+    "src/object.h": {
+     "hard:TRIVIAL": 4
+    },
+    "src/pqsort.c": {
+     "hard:BACKUP": 1,
+     "soft:RHYTHM": 1
+    },
+    "src/pubsub.c": {
+     "soft:NO-DOC": 6
+    },
+    "src/quicklist.c": {
+     "hard:TRIVIAL": 6,
+     "soft:NO-DOC": 9,
+     "soft:RHYTHM": 8
+    },
+    "src/quicklist.h": {
+     "soft:NO-TEACHER": 1
+    },
+    "src/rax.c": {
+     "hard:TRIVIAL": 1,
+     "hard:VAGUE": 2,
+     "soft:NO-DOC": 1,
+     "soft:NO-TEACHER": 1,
+     "soft:RHYTHM": 3
+    },
+    "src/rdb.c": {
+     "hard:TODO": 2,
+     "hard:TRIVIAL": 7,
+     "hard:VAGUE": 1,
+     "soft:NO-DOC": 13,
+     "soft:RHYTHM": 9
+    },
+    "src/rdb.h": {
+     "hard:TRIVIAL": 6
+    },
+    "src/redis-benchmark.c": {
+     "hard:BACKUP": 1,
+     "hard:TODO": 2,
+     "hard:TRIVIAL": 1,
+     "soft:NO-DOC": 1,
+     "soft:RHYTHM": 9
+    },
+    "src/redis-check-aof.c": {
+     "soft:NO-DOC": 7,
+     "soft:RHYTHM": 2
+    },
+    "src/redis-check-rdb.c": {
+     "soft:NO-DOC": 1,
+     "soft:RHYTHM": 1
+    },
+    "src/redis-cli.c": {
+     "hard:TODO": 1,
+     "hard:TRIVIAL": 15,
+     "hard:VAGUE": 1,
+     "soft:NO-DOC": 6,
+     "soft:RHYTHM": 43
+    },
+    "src/redis-trib.rb": {
+     "soft:NO-DESIGN": 1,
+     "soft:NO-DOC": 3
+    },
+    "src/redisassert.c": {
+     "soft:DMOD": 1,
+     "soft:NO-DOC": 2
+    },
+    "src/redismodule.h": {
+     "hard:TRIVIAL": 4,
+     "soft:NO-DESIGN": 1,
+     "soft:NO-DOC": 1,
+     "soft:NO-TEACHER": 1,
+     "soft:RHYTHM": 1
+    },
+    "src/release.c": {
+     "soft:DMOD": 1
+    },
+    "src/replication.c": {
+     "hard:TRIVIAL": 5,
+     "soft:NO-DOC": 18,
+     "soft:NO-TEACHER": 1,
+     "soft:RHYTHM": 5
+    },
+    "src/rio.c": {
+     "soft:NO-DOC": 4
+    },
+    "src/rio.h": {
+     "hard:TRIVIAL": 2,
+     "soft:NO-TEACHER": 1
+    },
+    "src/script.c": {
+     "soft:NO-DOC": 1
+    },
+    "src/script.h": {
+     "soft:NO-TEACHER": 1
+    },
+    "src/script_lua.c": {
+     "hard:TRIVIAL": 1,
+     "soft:NO-DOC": 8
+    },
+    "src/sds.c": {
+     "soft:NO-DOC": 1,
+     "soft:NO-TEACHER": 1,
+     "soft:RHYTHM": 5
+    },
+    "src/sds.h": {
+     "soft:NO-LAYOUT-ASSERT": 5,
+     "soft:NO-TEACHER": 1
+    },
+    "src/sentinel.c": {
+     "hard:TODO": 1,
+     "hard:TRIVIAL": 26,
+     "hard:VAGUE": 2,
+     "soft:NO-DOC": 19,
+     "soft:RHYTHM": 8
+    },
+    "src/server.c": {
+     "hard:TRIVIAL": 32,
+     "hard:VAGUE": 1,
+     "soft:NO-DOC": 66,
+     "soft:NO-TEACHER": 1,
+     "soft:RHYTHM": 14
+    },
+    "src/server.h": {
+     "hard:TRIVIAL": 161,
+     "hard:VAGUE": 2,
+     "soft:NO-LAYOUT-ASSERT": 1,
+     "soft:NO-TEACHER": 1
+    },
+    "src/set_entry.c": {
+     "soft:NO-DOC": 7,
+     "soft:RHYTHM": 1
+    },
+    "src/setcpuaffinity.c": {
+     "soft:RHYTHM": 1
+    },
+    "src/setproctitle.c": {
+     "soft:NO-DOC": 1
+    },
+    "src/sha1.c": {
+     "hard:BACKUP": 2,
+     "soft:NO-DOC": 5
+    },
+    "src/sha256.c": {
+     "soft:NO-DOC": 3
+    },
+    "src/siphash.c": {
+     "hard:BACKUP": 1,
+     "soft:NO-DOC": 1,
+     "soft:RHYTHM": 1
+    },
+    "src/slowlog.c": {
+     "soft:RHYTHM": 1
+    },
+    "src/sort.c": {
+     "hard:TRIVIAL": 1,
+     "soft:NO-DOC": 1,
+     "soft:RHYTHM": 1
+    },
+    "src/sparsearray.c": {
+     "hard:TRIVIAL": 2,
+     "soft:NO-DOC": 3,
+     "soft:RHYTHM": 2
+    },
+    "src/stream.h": {
+     "hard:TRIVIAL": 5,
+     "soft:NO-DESIGN": 1,
+     "soft:NO-TEACHER": 1
+    },
+    "src/t_array.c": {
+     "hard:TRIVIAL": 5,
+     "hard:VAGUE": 1,
+     "soft:NO-DOC": 1,
+     "soft:RHYTHM": 6
+    },
+    "src/t_hash.c": {
+     "hard:TRIVIAL": 9,
+     "hard:VAGUE": 3,
+     "soft:NO-DOC": 26,
+     "soft:RHYTHM": 10
+    },
+    "src/t_list.c": {
+     "hard:TRIVIAL": 1,
+     "soft:NO-DOC": 10,
+     "soft:RHYTHM": 3
+    },
+    "src/t_set.c": {
+     "hard:TRIVIAL": 5,
+     "soft:NO-DOC": 15,
+     "soft:RHYTHM": 6
+    },
+    "src/t_stream.c": {
+     "hard:TODO": 2,
+     "hard:TRIVIAL": 18,
+     "hard:VAGUE": 1,
+     "soft:NO-DOC": 3,
+     "soft:RHYTHM": 11
+    },
+    "src/t_string.c": {
+     "hard:TRIVIAL": 1,
+     "soft:NO-DOC": 14,
+     "soft:RHYTHM": 5
+    },
+    "src/t_zset.c": {
+     "hard:TRIVIAL": 9,
+     "soft:NO-DOC": 25,
+     "soft:RHYTHM": 13
+    },
+    "src/threads_mngr.c": {
+     "hard:TRIVIAL": 2,
+     "soft:NO-DOC": 3
+    },
+    "src/timeout.c": {
+     "soft:DMOD": 1,
+     "soft:NO-DOC": 1
+    },
+    "src/tls.c": {
+     "hard:TRIVIAL": 2,
+     "soft:NO-DOC": 3,
+     "soft:RHYTHM": 2
+    },
+    "src/tracking.c": {
+     "soft:NO-DOC": 1
+    },
+    "src/tsan.sup": {
+     "hard:TODO": 1
+    },
+    "src/util.c": {
+     "hard:TRIVIAL": 1,
+     "soft:NO-DOC": 8,
+     "soft:RHYTHM": 4
+    },
+    "src/vector.c": {
+     "soft:NO-DOC": 1,
+     "soft:RHYTHM": 1
+    },
+    "src/vector.h": {
+     "hard:TRIVIAL": 1,
+     "soft:NO-DESIGN": 1
+    },
+    "src/ziplist.c": {
+     "hard:TRIVIAL": 2,
+     "soft:NO-DOC": 3,
+     "soft:NO-TEACHER": 1,
+     "soft:RHYTHM": 2
+    },
+    "src/zipmap.c": {
+     "hard:TRIVIAL": 1,
+     "hard:VAGUE": 1,
+     "soft:NO-DOC": 1,
+     "soft:RHYTHM": 1
+    },
+    "src/zmalloc.c": {
+     "soft:NO-DOC": 25,
+     "soft:RHYTHM": 1
+    },
+    "src/zset_btree.c": {
+     "soft:NO-DOC": 3,
+     "soft:RHYTHM": 10
+    }
+   },
+   "plugin": "0.0.3",
+   "rhythm_ok": 0.514,
+   "soft": {
+    "DMOD": 15,
+    "NO-DESIGN": 9,
+    "NO-DOC": 895,
+    "NO-LAYOUT-ASSERT": 7,
+    "NO-TEACHER": 31,
+    "RHYTHM": 321
+   }
+  },
+  "sds": {
+   "cli": {
+    "debt": {
+     "exit": 0,
+     "findings": 0
+    },
+    "metrics": {
+     "exit": 0,
+     "findings": 13
+    },
+    "sync": {
+     "exit": 0,
+     "findings": 0
+    }
+   },
+   "coverage": {
+    "functions": 53,
+    "functions_signalled": 0.075,
+    "long_functions": 4,
+    "long_rhythm": 1.0,
+    "modules": 4,
+    "modules_signalled": 0.5
+   },
+   "files": 8,
+   "hard": {},
+   "inexact_files": [],
+   "lines": 1754,
+   "path": "",
+   "per_file": {
+    "sds.c": {
+     "soft:NO-DOC": 2,
+     "soft:NO-TEACHER": 1,
+     "soft:RHYTHM": 4
+    },
+    "sds.h": {
+     "soft:NO-LAYOUT-ASSERT": 5,
+     "soft:NO-TEACHER": 1
+    }
+   },
+   "plugin": "0.0.3",
+   "rhythm_ok": 0.0,
+   "soft": {
+    "NO-DOC": 2,
+    "NO-LAYOUT-ASSERT": 5,
+    "NO-TEACHER": 2,
+    "RHYTHM": 4
+   }
+  }
+ }
+}

@@ -6,23 +6,31 @@ Usage:
   craft-comment-sync.py --hook                       PostToolUse: the comments one Edit/Write/MultiEdit wrote
 
 Findings, one line each ("path:line: [KIND] detail"):
-  [ORPHAN]  an identifier removed from the code is still named by a comment of
-            the same file: a stale Function, Design, Teacher or Checklist
-            comment. Distinctive names (snake_case, camelCase, digits,
-            ALL_CAPS) match as whole words; plain words only as `name` or name(.
+  [ORPHAN]  an identifier the change removed from the code of a file is used by
+            no code anywhere in the repository, yet a comment still names it:
+            a stale Function, Design, Teacher or Checklist comment, in any
+            file. A prose document (DESIGN.md, README) that names it is a
+            review signal; history files (CHANGELOG, NEWS) are left alone.
+            Distinctive names (snake_case, camelCase, digits, ALL_CAPS) match
+            as whole words; plain words only as `name` or name(.
   [BACKUP]  a new comment is commented-out code. Inside a block of comment
             lines it takes a majority of code-shaped lines, so prose with one
             code-like line is never Backup.
-  [TRIVIAL] a new one-line comment restates its code: >= 60% of its content
-            words (at most 6) already appear in the code it describes. That is
-            the single statement under a standalone comment (a blank line, a
+  [TRIVIAL] a new one-line comment restates the statement it describes: the
+            single statement under a standalone comment (a blank line, a
             comment, a closing brace or a dedent ends its block), or the same
-            line for a trailing comment. A comment over two or more statements
-            titles a block: it is a Guide comment, never Trivial.
-  [VAGUE]   a new one-line comment of <= 8 words made only of generic words
-            ("Process the data", "Handle edge cases", "Update state if
-            needed"): no domain term, symbol, number or causal connective.
-            Numbered Guide comments (1:, 3a.) are exempt.
+            line for a trailing comment. Hard when >= 80% of its content words
+            (at most 6; abbreviations such as buf and buffer count as one) are
+            in that statement and at most one is missing; from 60% a review
+            signal, since the missing words may be the point. A comment over
+            two or more statements titles a block (a Guide comment), and one
+            on a declaration (field, enum member, macro, initializer slot,
+            prototype, file-scope variable) documents a name: neither is ever
+            Trivial.
+  [VAGUE]   review signal: a new one-line comment of <= 8 words made only of
+            generic words ("Process the data", "Handle edge cases", "Update
+            state if needed"): no domain term, symbol, operator, number or
+            causal connective. Numbered Guide comments (1:, 3a.) are exempt.
   [DIAGRAM-FIELD] [DIAGRAM-ORDER] [DIAGRAM-SIZE]
             a Teacher diagram drawn with [field:size] cells (see craftlib.py)
             disagrees with the struct it documents: a cell names no field, a
@@ -34,10 +42,11 @@ Findings, one line each ("path:line: [KIND] detail"):
             is checked for order and widths only. Free-form diagrams without
             cells are never checked.
 
---hook runs only BACKUP, TRIVIAL and VAGUE, on the lines the call wrote: an
-orphan, or a diagram that disagrees with its struct, may be the middle of a
-change spread over several edits, so those wait for the Stop gate
-(craft-gate.py), which runs every check here over what the session changed.
+--hook reports only BACKUP and hard TRIVIAL findings, on the lines the call
+wrote: an orphan, or a diagram that disagrees with its struct, may be the
+middle of a change spread over several edits, and review signals are the
+Stop gate's to show once, so all of those wait for craft-gate.py, which runs
+every check here over what the session changed.
 --check-diff judges BACKUP, TRIVIAL and VAGUE only on lines changed since REF,
 and a diagram only when the change touches it or its struct, so legacy
 comments never block new work. Exit codes: 0 clean, 1 findings on stdout, 2
@@ -65,6 +74,15 @@ KEYWORDS = set("""
     noexcept decltype""".split())
 NOT_DISTINCTIVE = {"NULL", "TRUE", "FALSE", "TODO", "FIXME", "NOTE", "XXX", "HACK"}
 
+# ORPHAN asks git grep about at most MAX_NAMES names per call: one call is
+# far cheaper than one per name, and 200 names stay well below the 32k
+# characters of a Windows command line.
+MAX_NAMES = 200
+# Prose files whose job is to name what was removed: never ORPHAN.
+HISTORY = re.compile(r"^(?:changelog|changes|history|news|releases?)\b", re.I)
+# The line number of a report line "path:line: [KIND] ...", whatever the path holds.
+LINE_NO = re.compile(r":(\d+): \[")
+
 # A comment carrying rationale, a step number or an example is never Trivial
 # or Backup, whatever its words: it answers a question the code cannot.
 RATIONALE = re.compile(r"\b(?:why|because|since|otherwise|so that|avoid|must|never|don't|do not|note|warning|"
@@ -79,7 +97,46 @@ GENERIC = set("""process handle manage perform execute run do check update set g
     method variable result input output main helper misc various work needed necessary accordingly
     appropriately here some all if later now etc new old""".split())
 CAUSAL = re.compile(r"\b(?:due|prevent|before|after|unless|until|instead|only|cannot|can't|would|could)\b", re.I)
-SPECIFIC = re.compile(r"[a-z][A-Z]|\w_\w|\b[A-Z]{3,}\b|\d|`[^`]+`")
+# A symbol, a number or an operator names something exactly: "Handle >=" titles
+# one comparison case, it is not "Handle the cases".
+SPECIFIC = re.compile(r"[a-z][A-Z]|\w_\w|\b[A-Z]{3,}\b|\d|`[^`]+`|==|!=|<=|>=|&&|\|\||<<|>>|->|=>")
+# Abbreviations and their words count as one word, so "Free the query
+# buffer." restates free(c->query_buf) exactly.
+ABBREV = {"buf": "buffer", "len": "length", "ptr": "pointer", "idx": "index", "cnt": "count", "num": "number",
+          "str": "string", "msg": "message", "err": "error", "cfg": "config", "configuration": "config",
+          "arg": "argument", "func": "function", "fn": "function", "alloc": "allocate", "allocation": "allocate",
+          "init": "initialize", "initialization": "initialize", "tmp": "temporary", "prev": "previous",
+          "cur": "current", "curr": "current", "dst": "destination", "src": "source", "pos": "position",
+          "val": "value", "elem": "element", "obj": "object"}
+# TRIVIAL tiers. All or all but one of a comment's words in its statement is
+# a restatement (hard); from 60% it may be one (a review signal): "Return OOM
+# on incomplete stack info." over `if (it->stack.oom) return 0;` shares 3 of
+# 5 words, and the two it adds explain the condition.
+TRIVIAL_HARD, TRIVIAL_SIGNAL = 0.8, 0.6
+# A comment on a declaration documents a name, the Function comment of data:
+# `int backup_state; /* BACKUP_STATE_* */` says which values the field takes,
+# `dictSdsKeyCompare, /* key compare */` which slot an initializer fills. So
+# TRIVIAL judges statements only. Lexical, one line of code at a time:
+DECLARATION = [re.compile(p) for p in (
+    r",$",                                                 # list element: initializer slot, enum member, argument
+    r"^#\s*define\b",                                      # macro
+    r"^(?!(?:return|else|case|goto|throw|delete|new|break|continue|yield|await|typeof|sizeof)\b)"
+    r"(?:[A-Za-z_][\w:<>]*[\s*&]+)+[*&]*[A-Za-z_]\w*(?:\s*\[[^\]]*\])*(?:\s*:\s*\d+)?\s*;$",   # field: type name;
+    r"^(?!(?:return|else|case|goto|throw|delete|new|yield|await)\b)"
+    r"(?:[A-Za-z_][\w:<>]*[\s*&]+)+[*&]*[A-Za-z_][\w:]*\s*\((?:[^()]|\([^()]*\))*\)\s*(?:const\s*)?;$",  # prototype
+)]
+FAMILY_DECLARATION = {
+    "py": re.compile(r"^(?!(?:else|try|finally|except|lambda)\b)[A-Za-z_]\w*\s*:\s*[^=\s][^=]*(?:=.*)?$"),  # x: int
+    "js": re.compile(r"^(?:readonly\s+)?[A-Za-z_$][\w$]*\??\s*:\s*[^=;]+;?$"),                    # name?: Type;
+    "go": re.compile(r"^(?:(?:var|const|type)\s+\w+.*|(?!(?:return|go|defer|goto|break|continue|fallthrough|case|"
+                     r"default|select|package|import)\b)[A-Za-z_]\w*\s+[\w.*\[\]]+(?:\s+`[^`]*`)?)$"),  # Name string
+}
+# Where every statement ends in ';', a line without one that is a bare name,
+# possibly with a value (an enum's last member), declares it too; at column 0
+# a storage class opens a file-scope declaration, whatever initializes it.
+SEMICOLON_FAMILIES = ("c", "cs", "php")
+FILE_SCOPE = re.compile(r"^(?:static|extern|const|__thread|thread_local|_Thread_local|typedef)\b")
+BARE_NAME = re.compile(r"[A-Za-z_]\w*(?:\s*=\s*[^;{}]+)?")
 PROSE = re.compile(r"^[A-Z][a-z']*\s+\S+\s+\S+.*[.!?]$")
 VERBS = ((re.compile(r"\+\+|\+="), "increment add increase"),
          (re.compile(r"--|-="), "decrement subtract decrease"),
@@ -121,7 +178,7 @@ _PY_CODE = [re.compile(p) for p in (
 
 
 def words(text):
-    """Return the lowercase content words of `text`: camelCase and snake_case split, plurals folded.
+    """Return the lowercase content words of `text`: camelCase and snake_case split, plurals and abbreviations folded.
 
     Bare numbers are dropped: "Return 0 on OOM" above `return 0;` carries one
     real word the code lacks (OOM), and literals must not outvote it.
@@ -131,13 +188,23 @@ def words(text):
         w = tok.lower()
         if len(w) > 3 and w.endswith("s") and not w.endswith("ss"):
             w = w[:-1]
+        w = ABBREV.get(w, w)
         if w not in STOP and not w.isdigit():
             out.add(w)
     return out
 
 
 def trivial(comment, code):
-    """Return the share of the comment's words already present in `code` when >= 0.6, else None."""
+    """Return (share, missing) when >= TRIVIAL_SIGNAL of the comment's words are in `code`, else None.
+
+    A number the code does not show is information, whatever the words: redis
+    wrote `dictCreate(&BenchmarkDictTypeNoValue);  /* no_value = 1 */`.
+
+    `share` is the fraction of the comment's content words (at most 6) that
+    `code` already holds, `missing` the number of the others.
+    """
+    if set(re.findall(r"\b\d+\b", comment)) - set(re.findall(r"\b\d+\b", code)):
+        return None
     if RATIONALE.search(comment) or STEP.match(comment) or EXAMPLE.search(comment):
         return None
     said = words(comment)
@@ -147,8 +214,21 @@ def trivial(comment, code):
     for pattern, verbs in VERBS:
         if pattern.search(code):
             seen.update(verbs.split())
-    ratio = len(said & seen) / len(said)
-    return ratio if ratio >= 0.6 else None
+    hit = len(said & seen)
+    return (hit / len(said), len(said) - hit) if hit / len(said) >= TRIVIAL_SIGNAL else None
+
+
+def declaration(line, family):
+    """Return True when the code of `line` declares a name instead of running a step (see DECLARATION)."""
+    code = line.code.strip()
+    if any(p.search(code) for p in DECLARATION):
+        return True
+    if family in FAMILY_DECLARATION:
+        return FAMILY_DECLARATION[family].match(code) is not None
+    if family not in SEMICOLON_FAMILIES:
+        return False
+    at_file_scope = not line.raw[:1].isspace() and FILE_SCOPE.match(code) is not None
+    return at_file_scope or BARE_NAME.fullmatch(code) is not None
 
 
 def backup(comment, family):
@@ -191,7 +271,7 @@ def vague(comment):
 
 
 def described_code(lines, no):
-    """Return the single statement a standalone comment at 1-based line `no` describes, or None.
+    """Return the Line of the single statement a standalone comment at 1-based line `no` describes, or None.
 
     None when the comment belongs to a multi-line comment block or heads two
     or more statements: then it titles a block (a Guide comment) or teaches
@@ -209,7 +289,7 @@ def described_code(lines, no):
         if not code or CLOSER.match(code) or (indent is not None and depth < indent):
             break
         indent = depth if indent is None else indent
-        block.append(line.code)
+        block.append(line)
         if len(block) > 1:
             return None
     return block[0] if block else None
@@ -330,12 +410,13 @@ def clip(text, width=60):
 
 
 def comment_findings(lines, family, added, where):
-    """Return (key, message) for BACKUP, TRIVIAL and VAGUE among the comment lines in `added`.
+    """Return (hard, soft) lists of (key, message) for BACKUP, TRIVIAL and VAGUE among the comment lines in `added`.
 
     These judge one comment against its own code, so they are safe after any
-    single edit (the PostToolUse level of craftlib's design notes).
+    single edit (the PostToolUse level of craftlib's design notes). Hard:
+    BACKUP and TRIVIAL at TRIVIAL_HARD; soft: TRIVIAL below it and VAGUE.
     """
-    out = []
+    hard, soft = [], []
     for no in sorted(added):
         if no > len(lines):
             continue
@@ -348,47 +429,124 @@ def comment_findings(lines, family, added, where):
         if line.kind == "doc" and in_block and not line.code.strip():
             continue
         if line.code.strip():
-            target = line.code
+            target = line
         elif line.kind != "doc" and backup(said, family) and (not in_block or block_is_code(lines, no, family)):
-            out.append(("sync|%s|BACKUP|%s" % (where, said),
-                        "%s:%d: [BACKUP] commented-out code, git is the backup: '%s'" % (where, no, clip(said))))
+            hard.append(("sync|%s|BACKUP|%s" % (where, said),
+                         "%s:%d: [BACKUP] commented-out code, git is the backup: '%s'" % (where, no, clip(said))))
             continue
         else:
             target = described_code(lines, no)
         # Why: a doc comment is a Function comment, never deletable as Trivial; it can only be Vague.
-        ratio = trivial(said, target) if target and line.kind != "doc" else None
-        if ratio:
-            out.append(("sync|%s|TRIVIAL|%s" % (where, said),
-                        "%s:%d: [TRIVIAL] restates its code (%d%% word overlap), delete or say why: '%s'"
-                        % (where, no, round(ratio * 100), clip(said))))
+        stated = trivial(said, target.code) if target and line.kind != "doc" and not declaration(target, family) \
+            else None
+        if stated and stated[0] >= TRIVIAL_HARD and stated[1] <= 1:
+            hard.append(("sync|%s|TRIVIAL|%s" % (where, said),
+                         "%s:%d: [TRIVIAL] restates its code (%d%% word overlap), delete or say why: '%s'"
+                         % (where, no, round(stated[0] * 100), clip(said))))
+        elif stated:
+            soft.append(("sync|%s|TRIVIAL|%s" % (where, said),
+                         "%s:%d: [TRIVIAL] %d%% of its words are in the code: what does it add? If nothing, "
+                         "delete it: '%s'" % (where, no, round(stated[0] * 100), clip(said))))
         elif (line.code.strip() or not in_block) and vague(said):
-            out.append(("sync|%s|VAGUE|%s" % (where, said),
-                        "%s:%d: [VAGUE] says nothing the code does not: name the domain fact, limit or reason: '%s'"
-                        % (where, no, clip(said))))
-    return out
+            soft.append(("sync|%s|VAGUE|%s" % (where, said),
+                         "%s:%d: [VAGUE] which domain fact, limit or reason does it name? Name one, or delete "
+                         "it: '%s'" % (where, no, clip(said))))
+    return hard, soft
 
 
-def audit(where, family, text, added, removed):
-    """Return (key, message) for every check of this script on one file.
+def audit(where, family, text, added):
+    """Return (hard, soft) lists of (key, message) for the checks of this script that read one file alone.
 
-    `added` holds the 1-based line numbers the change wrote; `removed` the
-    identifiers that were in the old code (those still in the code are
-    filtered here, so callers may pass the whole old identifier set). Keys
-    omit line numbers, which shift with every edit; see craft-gate.py.
+    `added` holds the 1-based line numbers the change wrote. ORPHAN needs
+    the whole repository: see orphan_findings(). Keys omit line numbers,
+    which shift with every edit; see craft-gate.py.
     """
     lines = cl.scan(text, family)
-    out = []
+    hard, soft = comment_findings(lines, family, added, where)
+    return hard + diagram_findings(lines, family, added, where), soft
 
-    # ORPHAN: identifiers gone from the code but still named by any comment.
-    gone = sorted(s for s in removed - cl.code_identifiers(lines)
-                  if len(s.strip("_$")) >= 3 and s.lower() not in KEYWORDS)
-    for no, line in enumerate(lines, 1):
-        for sym in gone if line.comment else ():
-            if mentions(line.comment, sym):
-                out.append(("sync|%s|ORPHAN|%s" % (where, sym),
-                            "%s:%d: [ORPHAN] '%s' is gone from the code but this comment still names it"
-                            % (where, no, sym)))
-    return out + comment_findings(lines, family, added, where) + diagram_findings(lines, family, added, where)
+
+def orphan_findings(root, changes, show=None):
+    """Return (hard, soft) lists of ORPHAN (key, message) for the session in `changes`.
+
+    `changes` are craftlib Change records; `show` maps a repository-relative
+    path to the one printed (default: unchanged). The steps:
+
+    1. Candidates: identifiers that left the code of a changed file and are
+       in the code of no changed file (a move between two changed files is
+       not a removal).
+    2. One `git grep -nozIwF` per MAX_NAMES candidates lists every line of
+       the repository, tracked or untracked, that holds one as a word.
+    3. The lexer splits those lines: a candidate in code anywhere is alive
+       (it moved, or was only renamed locally); a gone one is cited by each
+       comment that names it (hard) and by each line of a prose document
+       that names it (soft). History files are skipped.
+
+    Outside git, git grep finds nothing and only step 1 runs: no findings.
+    """
+    show = show or (lambda rel: rel)
+
+    # 1. Names that left the code of a changed file and stay in none.
+    removed, present = set(), set()
+    for ch in changes:
+        family = cl.family_of(ch.rel)
+        if family:
+            now = cl.code_identifiers(cl.scan(ch.text, family))
+            present |= now
+            if ch.old:
+                removed |= cl.code_identifiers(cl.scan(ch.old, family)) - now
+    names = sorted(s for s in removed - present if len(s.strip("_$")) >= 3 and s.lower() not in KEYWORDS)
+
+    # 2. Every line that holds one of them as a word, grouped by name and file.
+    hits = {}
+    for i in range(0, len(names), MAX_NAMES):
+        args = ["grep", "-nozIwF", "--untracked"]
+        for name in names[i:i + MAX_NAMES]:
+            args += ["-e", name]
+        for record in (cl.git(args, root) or "").splitlines():
+            parts = record.split("\0")
+            if len(parts) == 3 and parts[1].isdigit():
+                hits.setdefault(parts[2], {}).setdefault(parts[0], []).append(int(parts[1]))
+
+    # 3. Code keeps a name alive; comments and documents that still name a gone one are reported.
+    texts = {}
+
+    def lines_of(rel):
+        """Return (scanned lines or None, raw lines) of `rel`, read once per call of orphan_findings."""
+        if rel not in texts:
+            text = cl.read_text(os.path.join(root, rel)) or ""
+            family = cl.family_of(rel)
+            texts[rel] = (cl.scan(text, family) if family else None, text.replace("\r\n", "\n").split("\n"))
+        return texts[rel]
+
+    # Walk the hits of each name, file by file, until one in code proves it alive.
+    hard, soft = [], []
+    for name in names:
+        alive, cited = False, []
+        for rel, numbers in sorted(hits.get(name, {}).items()):
+            prose = rel.lower().endswith(cl.PROSE_EXT)
+            if prose and HISTORY.match(os.path.basename(rel)):
+                continue
+            scanned, raw = lines_of(rel)
+            for no in numbers:
+                if scanned is not None and no <= len(scanned):
+                    line = scanned[no - 1]
+                    if name in cl.code_identifiers([line]):
+                        alive = True
+                        break
+                    if line.comment and mentions(line.comment, name):
+                        cited.append((rel, no, True))
+                elif prose and no <= len(raw) and mentions(raw[no - 1], name):
+                    cited.append((rel, no, False))
+            if alive:
+                break
+        # A gone name: every comment still citing it must be fixed, a document is only flagged.
+        for rel, no, in_code in [] if alive else cited:
+            message = ("%s:%d: [ORPHAN] '%s' is gone from the code but this comment still names it" if in_code else
+                       "%s:%d: [ORPHAN] '%s' is gone from the code: is what this document says about it still true?")
+            (hard if in_code else soft).append(("sync|%s|ORPHAN|%s" % (rel, name), message % (show(rel), no, name)))
+    order = (lambda item: (item[1].split(":", 1)[0], int(item[1].split(":", 2)[1])))
+    return sorted(hard, key=order), sorted(soft, key=order)
 
 
 def from_hook(data):
@@ -398,40 +556,52 @@ def from_hook(data):
     if not family:
         return []
     path, text, added = got
-    return [msg for _, msg in comment_findings(cl.scan(text, family), family, added, cl.shown(path))]
+    lines = cl.scan(text, family)
+    # Why: in a file the lexer misreads, code may come out as a comment; the
+    # Stop gate reports such findings as review signals instead.
+    if cl.inexact_reason(path, text, lines):
+        return []
+    hard, _ = comment_findings(lines, family, added, cl.shown(path))
+    return [msg for _, msg in hard]
 
 
 def from_git(base):
-    """Return the report lines for every code file that changed since `base` or is untracked; [] outside git."""
+    """Return the report lines for every code file that changed since `base` or is untracked; [] outside git.
+
+    The CLI prints hard findings and review signals alike: whoever runs it
+    asked for the whole picture.
+    """
     root = cl.repo_root(os.getcwd())
     if not root:
         return []
     base = cl.resolve_base(root, base)
-    out = []
+    out, changes = [], []
     for rel, new in cl.changed_files(root, base):
         path = os.path.join(root, rel)
         text = cl.read_text(path)
-        if text is None:
-            continue
         family = cl.family_of(rel)
+        if text is None or not family:
+            continue
         if new:
             added, old = set(range(1, text.count("\n") + 2)), ""
         else:
             added, old = cl.added_lines(root, base, rel), cl.baseline_text(root, base, rel)
-        removed = cl.code_identifiers(cl.scan(old, family)) if old else set()
-        out += [msg for _, msg in audit(cl.shown(path), family, text, added, removed)]
-    return out
+        changes.append(cl.Change(rel, path, text, old, new, added))
+        hard, soft = audit(cl.shown(path), family, text, added)
+        out += sorted((msg for _, msg in hard + soft), key=lambda msg: int(LINE_NO.search(msg).group(1)))
+    hard, soft = orphan_findings(root, changes, lambda rel: cl.shown(os.path.join(root, rel)))
+    return [msg for _, msg in hard + soft] + out
 
 
 def gate_findings(root, changes):
-    """Stop gate: return (key, message) for every check of this script on the files `changes` lists."""
-    out = []
+    """Stop gate: return (hard, soft) lists of (key, message) for every check of this script on `changes`."""
+    hard, soft = orphan_findings(root, changes)
     for ch in changes:
         family = cl.family_of(ch.rel)
         if family:
-            removed = cl.code_identifiers(cl.scan(ch.old, family)) if ch.old else set()
-            out += audit(ch.rel, family, ch.text, ch.added, removed)
-    return out
+            file_hard, file_soft = audit(ch.rel, family, ch.text, ch.added)
+            hard, soft = hard + file_hard, soft + file_soft
+    return hard, soft
 
 
 def main():

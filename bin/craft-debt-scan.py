@@ -16,9 +16,11 @@ line 1 (AGENTS.md, "Debt"), and a marker must open a comment:
   - "FIXME: <defect>; <trigger condition>"                 known defect
 
 Findings, one line each ("path:line: [KIND] source line"):
-  [TODO]        a bare TODO: rewrite it as one of the two markers above.
+  [TODO]        a bare TODO, XXX, HACK or lowercase todo: rewrite it as one of the
+                two markers above.
   [NO-CEILING]  a shortcut without a number: name the ceiling ("~10k entries").
-  [NO-TRIGGER]  a shortcut or FIXME without a trigger (';', '>', if, when, once...).
+  [NO-TRIGGER]  a shortcut or FIXME without a trigger (';' before at least two
+                words, '>', if, when, once...).
   [TRACKED]     a well-formed marker (ledger only: never with --quiet or --hook).
 
 Markers are read from real comments through the shared lexer in craftlib.py,
@@ -34,7 +36,7 @@ import sys
 
 import craftlib as cl
 
-HINT = "Fix: shortcut: <quantified ceiling>; <revisit trigger> | FIXME: <defect>; <trigger condition> | no bare TODO."
+HINT = "Fix: shortcut: <quantified ceiling>; <revisit trigger> | FIXME: <defect>; <trigger condition> | no bare TODO, XXX or HACK."
 SKIP_DIRS = {".git", "node_modules", "vendor", "dist", "build", "target", "out", ".venv", "venv",
              "__pycache__", ".tox", ".mypy_cache", ".pytest_cache", ".next", ".cache"}
 
@@ -88,6 +90,10 @@ def from_hook(data):
     if not got:
         return []
     path, text, lines = got
+    # Why: in a file the lexer misreads, a marker may sit in a heredoc or a
+    # raw string; the Stop gate reports it as a review signal instead.
+    if cl.inexact_reason(path, text):
+        return []
     where = cl.shown(path)
     out = [_finding(where, no, verdict, source) for no, verdict, source in cl.debt_markers(path, text, lines)
            if verdict]

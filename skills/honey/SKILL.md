@@ -2,13 +2,13 @@
 name: honey
 description: Alias of /tupelo. Set the tupelo-honey mode (lite, full, ultra, off) for this session, or with "default" for every new session.
 argument-hint: "[lite|full|ultra|off] | default [lite|full|ultra|off]"
-allowed-tools: Bash(bash:*)
+allowed-tools: Bash(bash:*), Bash(craft-mode.sh:*)
 disable-model-invocation: true
 ---
 
 Mode: !`bash "${CLAUDE_PLUGIN_ROOT}/bin/craft-mode.sh" command "$ARGUMENTS"`
 
-If the line above is missing or not of the form `mode=… scope=… default=…` or `error=…`, run `bash "${CLAUDE_PLUGIN_ROOT}/bin/craft-mode.sh" command "$ARGUMENTS"` once yourself (outside Claude Code the script is `bin/craft-mode.sh` at the plugin root).
+If the line above is missing or not of the form `mode=… scope=… default=…` or `error=…`, run `craft-mode.sh command "$ARGUMENTS"` once yourself; if that name is not found, `bash "${CLAUDE_PLUGIN_ROOT}/bin/craft-mode.sh" command "$ARGUMENTS"` (outside Claude Code the script is `bin/craft-mode.sh` at the plugin root).
 
 The forms (`/honey` is the same command and takes the same arguments):
 - `/tupelo` — back to the default mode in this session.

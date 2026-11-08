@@ -1,0 +1,9 @@
+# Contributing to tupelo-honey
+
+`AGENTS.md` is the standard the plugin ships to its users: the generated `craft-standard` skill brings it to every session with no setup, and the mirrors carry it to Cursor, Codex and Gemini CLI. Rules about maintaining this repository live here instead, and the repository's own `CLAUDE.md` imports both files.
+
+- **Layout:** only `plugin.json`, `marketplace.json` and `icon.png` inside `.claude-plugin/` (the repository is its own one-plugin marketplace, `provascripts`; a test keeps both versions equal); `skills/ agents/ hooks/ bin/` at the root, no `commands/` (Claude Code runs a plugin skill by its bare name, `/tupelo`, a plugin command only with the prefix, so `/tupelo` and `/honey` are skills); kebab-case names; paths via `${CLAUDE_PLUGIN_ROOT}`. `bin/` holds runtime scripts (on the Bash PATH while the plugin is enabled), `scripts/` maintenance tools; shared lexer and design notes in `bin/craftlib.py`.
+- **Stack:** Bash + Python 3.8+ stdlib only; Markdown skills and agents with YAML frontmatter.
+- **Test:** `python3 tests/test-bin.py` (from Git Bash on Windows). Validate: `claude plugin validate .` Polyglot parser fixtures live in `tests/fixtures/`: each stays clean under every scanner, and the tests derive the faulty variants.
+- **Generated mirrors, never edited by hand:** `.cursor/rules/systems-craft.mdc` (from `AGENTS.md`, without its Claude Code hooks subsection), `skills/craft-standard/` (from `AGENTS.md`, byte for byte), `skills/honey/` (from `skills/tupelo/`) and `.agents/skills/` (from `skills/`, without `craft-standard`). After editing a source run `bash scripts/sync-mirrors.sh`; the tests fail on drift.
+- **Session directive:** `craft-mode.sh session` prints the same bytes for a given mode in every session, so the prompt cache can keep it; keep any addition static and under 1200 characters per mode (a test checks both).

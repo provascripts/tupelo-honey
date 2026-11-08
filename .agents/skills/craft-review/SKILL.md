@@ -15,15 +15,17 @@ license: MIT
 No preamble, no compliments. Facts come from the scripts; judgment from you.
 
 ## Phase 1: scanners first (zero tokens of judgment)
-Run from the repository root (outside Claude Code the scripts live in the plugin's `bin/`):
+Run from the repository root; while the plugin is enabled its `bin/` is on the Bash PATH:
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/bin/craft-debt-scan.sh" --quiet
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/craft-comment-sync.py" --check-diff --base <base-ref>
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/craft-metrics.py" --report <changed code files>
+craft-debt-scan.sh --quiet
+craft-comment-sync.py --check-diff --base <base-ref>
+craft-metrics.py --report <changed code files>
 ```
+If a name is not found, run the script by path: `bash "${CLAUDE_PLUGIN_ROOT}/bin/craft-debt-scan.sh"`, `python3 "${CLAUDE_PLUGIN_ROOT}/bin/craft-comment-sync.py"` and so on (outside Claude Code, the plugin's `bin/` directory).
 `<base-ref>` is `HEAD` for uncommitted work, the merge base for a branch (`git merge-base HEAD main`). Each script prints nothing when clean. Their findings go into the delete-list as they are; never re-derive counts or line numbers by reading. Kinds, in the Stop gate's two tiers:
-- **Hard findings** (objective; fix them): debt markers (TODO, NO-TRIGGER, NO-CEILING); ORPHAN, BACKUP, TRIVIAL, VAGUE and DIAGRAM-FIELD/-ORDER/-SIZE (a `[field:size]` diagram that disagrees with its struct).
-- **Review signals** (diagnostic; confirm by reading): RHYTHM, HELPER, DMOD, NO-DOC, NO-DESIGN, NO-TEACHER and NO-LAYOUT-ASSERT (a physical layout no assertion pins). A signal becomes a list entry only when the code confirms it; ΔL_cog < 0 and the four helper benefits of AGENTS.md §1 decide, never the number.
+- **Hard findings** (decided with few false positives; fix them): debt markers (TODO, NO-TRIGGER, NO-CEILING); ORPHAN in a comment (a name gone from the code of the whole repository), BACKUP, TRIVIAL (>= 80% of the comment's words in its one statement, at most one missing) and DIAGRAM-FIELD/-ORDER/-SIZE (a `[field:size]` diagram that disagrees with its struct).
+- **Review signals** (diagnostic; confirm by reading): RHYTHM, HELPER (a pass-through with one caller), NO-DOC, NO-DESIGN, NO-TEACHER, NO-LAYOUT-ASSERT (a physical layout no assertion pins), NO-TEST (a changed type or new exported function, no test file touched), TRIVIAL from 60%, VAGUE and ORPHAN in a prose document. A signal becomes a list entry only when the code confirms it; ΔL_cog < 0 and the four helper benefits of AGENTS.md §1 decide, never the number.
+- **Inexact files:** in a file the lexer misreads (a nested comment, a raw string, a heredoc), every hard finding is a signal ending in `(inexact file: <construct> at line N; ...)`. Read the lines around it before listing it: it may be text inside the construct.
 
 ## Phase 2: symbol-to-comment sync
 For every function, struct, field, constant, macro or parameter renamed, removed or changed in meaning by the diff:
@@ -36,10 +38,10 @@ This overrides honey-review's "redundant narration" rule for source comments.
 - **Protect, never flag for deletion:** Function, Design, Why, Teacher (diagrams, math, numbered steps), Checklist, Guide.
 - **Delete:** Trivial (reading it costs as much as the code: `i++; // increment i`, `// Constructor for User`); Backup (commented-out code or debug prints).
 - **Validate:** Debt. Only `shortcut: <quantified ceiling>; <revisit trigger>` and `FIXME: <defect>; <trigger condition>`. A bare `TODO`, or a marker without ceiling or trigger, gets a concrete rewrite.
-- **Missing positives are findings too:** a function >= 40 LOC without Guide comments, pointer math or bitfields without a Teacher diagram, a public function without a Function comment, a module without a Design comment, a bug fix without a Why comment. `craft-metrics.py` reports the first four as RHYTHM, NO-TEACHER, NO-DOC and NO-DESIGN; it sees presence only, so read what those comments say and flag the wrong or empty ones.
+- **Missing positives are findings too:** a long function that branches or nests without Guide comments, pointer math or bitfields without a Teacher diagram, an exported function or one that hands over ownership without a Function comment, a module with its own data structure, binary layout, concurrency or two public types without a Design comment, a bug fix whose reason is not visible in the code without a Why comment. `craft-metrics.py` reports the first four as RHYTHM, NO-TEACHER, NO-DOC and NO-DESIGN; it sees presence only, so read what those comments say and flag the wrong or empty ones.
 
 ## Phase 4: Lever 1 cuts
-Premature abstractions (interface with one implementation, factory for one product), dead code, single-caller helpers < 30 LOC without a `Why:` (unless the helper draws a semantic boundary, owns a resource, removes duplication or is a test seam: then ask for the `Why:` instead of the cut), shallow modules (D_mod < 15, read as a hint), hand-rolled stdlib, speculative parameters. Never flag input validation, error handling, auth, secrets or failure-path tests as over-engineering.
+Premature abstractions (interface with one implementation, factory for one product), dead code, single-caller helpers that draw no semantic boundary, own no resource, remove no duplication and are no test seam (HELPER flags pass-throughs), shallow modules (D_mod < 15 in `--report`, a hint), hand-rolled stdlib, speculative parameters. Never flag input validation, error handling, auth, secrets or failure-path tests as over-engineering.
 
 ## Output: the delete-list
 ```text
@@ -54,4 +56,4 @@ Net: -33 LOC, 0 positive comments lost.
 Order by severity: P0 desync and correctness first, then Backup, Trivial, Lever 1 cuts, debt rewrites. The last line always states the LOC delta and that no positive comment was lost.
 
 ## Large diffs
-Over ~400 changed lines or ~10 files, delegate the audit to the `hive-craft-reviewer` subagent: it runs Phases 1-4 in its own context and returns columnar JSON keyed by `id`. Verify `n` equals the row count, then render the rows as the delete-list above for the user; never show the JSON itself.
+Over ~400 changed lines or ~10 files, delegate the audit to the `hive-craft-reviewer` subagent: it runs Phases 1-4 in its own context and returns columnar JSON keyed by `id`. Verify `n` equals the row count, then render the rows as the delete-list above; never show the JSON itself.

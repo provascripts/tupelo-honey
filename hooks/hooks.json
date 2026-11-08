@@ -1,11 +1,18 @@
 {
-  "description": "tupelo-honey zero-token gates: mode directive and change snapshot at session start; debt markers, Backup, Trivial and Vague comments on the lines each edit wrote; every check plus orphans, layout diagrams and review signals at Stop, over everything the session changed. Silent unless a rule is broken.",
+  "description": "tupelo-honey zero-token gates: mode directive and change snapshot at session start; debt markers, Backup and Trivial comments on the lines each edit wrote; every check plus orphans, layout diagrams and review signals at Stop, over everything the session changed. Review signals never cost a turn: the user sees them at once and Claude gets them with the next prompt. Silent unless a rule is broken.",
   "hooks": {
     "SessionStart": [
       {
         "hooks": [
           { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/bin/craft-mode.sh\" session", "timeout": 10 },
           { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/bin/craft-gate.py\" --snapshot", "timeout": 30 }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/bin/craft-gate.py\" --prompt", "timeout": 10 }
         ]
       }
     ],

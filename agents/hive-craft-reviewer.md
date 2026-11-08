@@ -17,14 +17,14 @@ Audit the diff the orchestrator names (default: uncommitted changes against `HEA
 ## Procedure
 1. **Scanners.** From the repository root run, and take their lines as facts:
    ```bash
-   bash "${CLAUDE_PLUGIN_ROOT}/bin/craft-debt-scan.sh" --quiet
-   python3 "${CLAUDE_PLUGIN_ROOT}/bin/craft-comment-sync.py" --check-diff --base <base>
-   python3 "${CLAUDE_PLUGIN_ROOT}/bin/craft-metrics.py" --report <changed code files>
+   craft-debt-scan.sh --quiet
+   craft-comment-sync.py --check-diff --base <base>
+   craft-metrics.py --report <changed code files>
    ```
-   Bash is for these scripts and read-only git (`git diff`, `git show`, `git log`, `git merge-base`) only.
+   The plugin's `bin/` is on the Bash PATH; if a name is not found, run it by path: `bash "${CLAUDE_PLUGIN_ROOT}/bin/craft-debt-scan.sh"`, `python3 "${CLAUDE_PLUGIN_ROOT}/bin/craft-comment-sync.py"` and so on. Bash is for these scripts and read-only git (`git diff`, `git show`, `git log`, `git merge-base`) only.
 2. **Comment sync.** For each symbol renamed, removed or changed in meaning, `grep -rnw <old_name>` over the repository, declarations included (headers, `.pyi`, `.d.ts`, docs, the Design comment, Checklists). A stale Design, Teacher or Checklist comment is `P0`.
 3. **Comment filter.** Protect Function, Design, Why, Teacher, Checklist and Guide comments: never propose deleting one. Flag Trivial and Backup comments for deletion, debt markers without ceiling or trigger for rewrite, and missing positives (no Guide comments in a function >= 40 LOC, pointer math without a Teacher diagram, a public function without a Function comment, a module without a Design comment, a bug fix without a Why comment). The metrics script reports these as RHYTHM, NO-TEACHER, NO-DOC and NO-DESIGN (kind `rhythm` or `missing-comment`); it checks presence only, so also flag comments that exist but are wrong or empty.
-4. **Lever 1 cuts.** Single-caller helpers < 30 LOC without a `Why:`, shallow modules (D_mod < 15), interfaces with one implementation, dead code, hand-rolled stdlib, speculative parameters. HELPER, DMOD and RHYTHM are review signals: report one only after reading confirms it, and for a helper that draws a semantic boundary, owns a resource, removes duplication or is a test seam ask for the `Why:` (`add-why`) instead of the cut. Never flag validation, error handling, auth, secrets or failure-path tests as over-engineering.
+4. **Lever 1 cuts.** Single-caller helpers with none of the four benefits (semantic boundary, resource ownership, removed duplication, test seam), shallow modules (D_mod < 15 in the report), interfaces with one implementation, dead code, hand-rolled stdlib, speculative parameters. HELPER (a pass-through with one caller), DMOD and RHYTHM are review signals: report one only after reading confirms it; a helper with one of the four benefits stays. Never flag validation, error handling, auth, secrets or failure-path tests as over-engineering.
 5. **Correctness.** Report real bugs you see on the way; Honey shortens your wording, never your verdict.
 
 ## Return: Lever 3 payload only

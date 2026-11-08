@@ -1,6 +1,6 @@
 {
   "name": "tupelo-honey",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "Standalone: write less code and craft dense source files with antirez's nine comment kinds, deep modules (Ousterhout), Pike/djb simplicity and SQLite-grade verification (Hipp). Carries the Honey levers it uses, no other plugin required; zero-token hooks check debt markers, comment drift and layout diagrams.",
   "author": {
     "name": "provascripts"

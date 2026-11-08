@@ -14,14 +14,23 @@ craft-metrics.py, craft-gate.py and this module):
   is never interrupted half-way:
 
     PostToolUse   judges the lines one Edit, Write or MultiEdit wrote, and
-                  only what those lines decide alone: debt markers, Backup,
-                  Trivial and Vague comments (craft-debt-scan.py --hook,
+                  only what those lines decide alone: debt markers, Backup
+                  and Trivial comments (craft-debt-scan.py --hook,
                   craft-comment-sync.py --hook).
     Stop          judges every file the session changed, Bash edits included
-                  (craft-gate.py): the same checks plus orphaned symbols and
-                  [field:size] diagrams are hard findings that block each Stop
-                  until fixed, at most 3 times each; the craft-metrics review
-                  signals are shown once per session.
+                  (craft-gate.py): the same checks, [field:size] diagrams and
+                  orphaned symbols (looked up in the whole repository) are hard
+                  findings that block each Stop until fixed, at most 3 times
+                  each; the craft-metrics review signals, orphans named only
+                  by prose documents and the hard findings of a file the
+                  lexer misreads (inexact_reason) are shown once per session
+                  and never block: when nothing else does, Claude stops, the
+                  user reads them at once and Claude gets them with the next
+                  prompt (UserPromptSubmit, craft-gate.py --prompt).
+
+  craft-gate.py --staged runs the Stop checks on the files staged for
+  commit, so a git pre-commit hook can apply the same rules outside Claude
+  Code.
 
   Parsing is lexical, not syntactic. scan() turns a file into one
   Line(code, comment, kind, raw, parts) per source line. _SPEC lists, per
@@ -46,9 +55,13 @@ craft-metrics.py, craft-gate.py and this module):
   Erlang, Fortran, Visual Basic.
 
   Known limitations (deliberate sacrifices):
-  - Nested block comments (Rust, Swift, Kotlin, Scala, Haskell, OCaml), C++
-    raw strings R"(...)", heredocs and Swift raw strings #"..."# are not
-    recognized.
+  - Nested block comments (Rust, Swift, Kotlin, Scala, Dart, Haskell, OCaml,
+    F#, Julia, Nim, Lisp), C++ raw strings R"(...)", heredocs (shell, Ruby,
+    Crystal, Perl, PHP) and Swift raw strings #"..."# are not lexed.
+    inexact_reason() spots them on scan()'s output, and the Stop gate turns
+    the hard findings of such a file into review signals that name the
+    construct. A real parser (tree-sitter) would read them, but it is not
+    stdlib: it could only ever be an optional backend.
   - A JS regex literal is told apart from a division by the previous code
     character on the same line only; a shell '#' opens a comment only at the
     start of a word.
@@ -68,6 +81,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from collections import namedtuple
 
 FAMILY = {}
@@ -297,6 +311,76 @@ def code_identifiers(lines):
 
 
 # --------------------------------------------------------------------------
+# Inexact files. scan() misreads each construct below from its first line on
+# ("Known limitations" in the design notes): code may come out as comment,
+# or the reverse. inexact_reason() spots them afterwards on scan()'s own
+# output, so scan() stays one pass without lookahead, and the Stop gate
+# turns a hard finding in such a file into a review signal naming why.
+# --------------------------------------------------------------------------
+
+# Nested comments: scan() ends "/* a /* b */ c */" at the first closer and
+# reads " c */" as code. The opener is the family's own block opener.
+_NESTING = frozenset(".rs .swift .kt .kts .scala .sc .dart .hs .elm .purs .idr .ml .mli .fs .fsi .fsx .jl .nim "
+                     ".lisp .lsp .scm .ss .rkt".split())
+_BLOCK_OPENER = {f: re.compile(e[0]) for f, spec in _SPEC.items() for e in spec if e[1] == "block"}
+# Raw strings, as their opener shows in Line.code: scan() takes the first
+# quote for a plain string, which the next inner quote or backslash breaks.
+_RAW_STRINGS = (
+    (frozenset(".c .h .cc .cpp .cxx .hh .hpp .cu .cuh .ino .mm".split()), re.compile(r'(?<!\w)(?:u8|[uUL])?R""'),
+     "C++ raw string"),
+    (frozenset([".swift"]), re.compile(r'#""'), "Swift raw string"),
+)
+# Heredocs: (extensions, opener on Line.raw capturing the closing tag,
+# whether the closing line may go on after the tag, as PHP's "EOT;" does).
+# An opener counts only when its line's code has '<<' (a comment or string
+# that mentions one does not) and a later line closes it, so a shift such
+# as $((a << b)) never counts. Ruby and Perl allow no space before a bare
+# tag: "class << self" is no heredoc.
+_HEREDOCS = (
+    (frozenset(".sh .bash .zsh .ksh".split()), re.compile(r"(?<!<)<<-?[ \t]*[\\\"']?(?P<tag>[A-Za-z_]\w*)"), False),
+    (frozenset(".rb .rake .gemspec .cr".split()), re.compile(r"(?<![<\w])<<[-~]?[\"'`]?(?P<tag>[A-Za-z_]\w*)"), False),
+    (frozenset(".pl .pm".split()), re.compile(r"(?<![<\w])<<~?(?:[ \t]*[\"'`]|\\)?(?P<tag>[A-Za-z_]\w*)"), False),
+    (frozenset([".php"]), re.compile(r"<<<[ \t]*[\"']?(?P<tag>[A-Za-z_]\w*)[\"']?[ \t]*$"), True),
+)
+
+
+def inexact_reason(path, text, lines=None):
+    """Return why scan() misreads `text`, such as "heredoc at line 3", or None when it reads it exactly.
+
+    `path` picks the language by its extension; pass scan()'s output for
+    `text` as `lines` when you already have it. The reason names the first
+    misread construct (see the table comments above) by its 1-based line.
+    """
+    ext = os.path.splitext(path)[1].lower()
+    family = FAMILY.get(ext)
+    if family is None:
+        return None
+    lines = scan(text, family) if lines is None else lines
+    nested = _BLOCK_OPENER.get(family) if ext in _NESTING else None
+    raw = [(pattern, name) for exts, pattern, name in _RAW_STRINGS if ext in exts]
+    heredoc = next(((opener, loose) for exts, opener, loose in _HEREDOCS if ext in exts), None)
+    closers = {}
+    if heredoc:
+        # Last index of each possible closing line: the stripped line, or its first word when loose.
+        for i, line in enumerate(lines):
+            word = IDENT.match(line.raw.strip()) if heredoc[1] else None
+            closers[word.group() if word else line.raw.strip()] = i
+
+    for i, line in enumerate(lines):
+        # A block opener in a block comment nests; a line doc (///, -- |, ##) only mentions it.
+        if nested and line.comment and nested.search(line.comment) and (line.kind in ("block", "multi") or (
+                line.kind == "doc" and not line.raw.lstrip().startswith(("//", "--", "##")))):
+            return "nested block comment at line %d" % (i + 1)
+        for pattern, name in raw:
+            if pattern.search(line.code):
+                return "%s at line %d" % (name, i + 1)
+        if heredoc and "<<" in line.code:
+            if any(closers.get(m.group("tag"), -1) > i for m in heredoc[0].finditer(line.raw)):
+                return "heredoc at line %d" % (i + 1)
+    return None
+
+
+# --------------------------------------------------------------------------
 # Debt markers (AGENTS.md, "Debt"). A marker opens a comment and carries its
 # own exit condition:
 #
@@ -304,29 +388,34 @@ def code_identifiers(lines):
 #     "FIXME: <defect>; <trigger condition>"                 known defect
 #
 # The ceiling needs at least one digit ("~10k entries", "<1ms", "n > 5000"),
-# the trigger a ';', a '>' or one of the words in TRIGGER. 'honey:' is the
-# legacy spelling of 'shortcut:'; a bare TODO is always a violation. In a
+# the trigger a ';' followed by at least two words, a '>' or one of the
+# words in TRIGGER. 'honey:' is the legacy spelling of 'shortcut:'. A bare
+# marker is always a violation: TODO, XXX, HACK and a lowercase 'todo:'
+# ('fixme:' is a FIXME). In a
 # file with a lexer family only real comments count, never a string literal;
 # other text files fall back to a line match on #, //, --, /* and a leading
 # * (<!-- in markup).
 # --------------------------------------------------------------------------
 
-MARKER = re.compile(r"(?P<tag>shortcut:|honey:|TODO(?!\w)|FIXME(?!\w))(?P<rest>.*)", re.S)
-TRIGGER = re.compile(r"[;>]|\b(?:if|when|whenever|once|unless|until|after|upon|triggers?|over|above|past|exceeds|"
+_TAGS = r"shortcut:|honey:|(?:TODO|XXX|HACK|FIXME)(?!\w)|todo:|fixme:"
+MARKER = re.compile(r"(?P<tag>" + _TAGS + r")(?P<rest>.*)", re.S)
+# Why two words after a ';': "; later" or "; sigh" names no condition anyone
+# could ever check, and the trigger exists to say when the debt falls due.
+TRIGGER = re.compile(r";\s*[\w'-]+\s+\w|>|\b(?:if|when|whenever|once|unless|until|after|upon|triggers?|over|above|past|exceeds|"
                      r"beyond)\b", re.I)
 PROSE_EXT = (".md", ".mdc", ".markdown", ".rst", ".txt")
 MARKUP_EXT = (".html", ".htm", ".xhtml", ".xml", ".vue", ".svelte")
-_MARK_AHEAD = r"(?=shortcut:|honey:|TODO(?!\w)|FIXME(?!\w))"
+_MARK_AHEAD = r"(?=" + _TAGS + r")"
 _FALLBACK = re.compile(r"(?:(?:^|(?<=\s))(?:#|//|--|/\*)|^\s*\*)\s*" + _MARK_AHEAD)
 _FALLBACK_MARKUP = re.compile(r"<!--\s*" + _MARK_AHEAD)
 
 
 def debt_verdict(tag, rest):
     """Return '' for a well-formed marker, else its violation: TODO, NO-CEILING or NO-TRIGGER."""
-    if tag.startswith("TODO"):
+    if tag.upper().startswith(("TODO", "XXX", "HACK")):
         return "TODO"
     trigger = TRIGGER.search(rest) is not None
-    if tag.startswith("FIXME"):
+    if tag.upper().startswith("FIXME"):
         return "" if trigger else "NO-TRIGGER"
     if not re.search(r"\d", rest):
         return "NO-CEILING"
@@ -757,14 +846,45 @@ def read_text(path):
         return None
 
 
+# Why a retry: on Windows another process (an antivirus, an indexer) can hold a
+# file under .git for a moment, and git then fails with one of these messages.
+# Anything else fails at once: a retry could only repeat it.
+GIT_TRANSIENT = re.compile(r"unable to|failed to|permission denied|cannot lock|could not (?:open|read|lock)", re.I)
+GIT_ATTEMPTS = 3
+_git_failures = 0
+
+
 def git(args, cwd):
-    """Run git in `cwd` and return stdout, or None if git is missing or exits non-zero."""
-    try:
-        r = subprocess.run(["git", "-c", "core.quotePath=false", *args], cwd=cwd,
-                           capture_output=True, encoding="utf-8", errors="replace", timeout=30)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return r.stdout if r.returncode == 0 else None
+    """Run git in `cwd` and return stdout, or None if git is missing or exits non-zero.
+
+    Exit 1 with nothing on stderr is git's plain "no" (rev-parse -q --verify
+    of a missing ref, grep without a match), and so is "not a git repository".
+    Any other non-zero exit, a git that cannot start and a timeout are
+    failures: a transient one is retried, up to GIT_ATTEMPTS runs in all, and
+    one that lasts is counted by git_failures(), since None alone cannot tell
+    "no" from "broken".
+    """
+    global _git_failures
+    for attempt in range(1, GIT_ATTEMPTS + 1):
+        try:
+            r = subprocess.run(["git", "-c", "core.quotePath=false", *args], cwd=cwd,
+                               capture_output=True, encoding="utf-8", errors="replace", timeout=30)
+        except (OSError, subprocess.SubprocessError):
+            break
+        if r.returncode == 0:
+            return r.stdout
+        if (r.returncode == 1 and not r.stderr.strip()) or "not a git repository" in r.stderr:
+            return None
+        if attempt == GIT_ATTEMPTS or not GIT_TRANSIENT.search(r.stderr):
+            break
+        time.sleep(0.05 * attempt)
+    _git_failures += 1
+    return None
+
+
+def git_failures():
+    """Return how many git commands of this process failed for good; see git()."""
+    return _git_failures
 
 
 def repo_root(cwd):
@@ -785,6 +905,56 @@ def resolve_base(root, base):
 Change = namedtuple("Change", "rel path text old new added")
 
 
+# A file a tool writes: nobody can fix a finding in it by hand, because the
+# next run of the tool undoes the fix. These are the header conventions of Go
+# ("Code generated ... DO NOT EDIT.") and of Meta's tools (@generated); both
+# live in a comment near the top, so strings and later lines do not count.
+_GENERATED_HEADER = re.compile(r"(?m)^\s*(?:#|//+|/\*+|\*|--|<!--|;+)\s*(?:Code generated .*DO NOT EDIT\.|.*@generated\b)")
+GENERATED_HEAD_LINES = 10
+_ATTR_BATCH = 100
+
+
+def generated(root, rels, text_of):
+    """Return the subset of `rels` that a tool writes.
+
+    A file is generated when its name holds `.gen.`, when a comment in its
+    first GENERATED_HEAD_LINES lines carries a generated-code header, or when
+    .gitattributes marks it linguist-generated (git answers that one, since it
+    knows the precedence rules). `text_of(rel)` returns its text or None.
+    """
+    out, rest = set(), []
+    for rel in rels:
+        named = ".gen." in os.path.basename(rel).lower()
+        if named or _GENERATED_HEADER.search("\n".join((text_of(rel) or "").split("\n")[:GENERATED_HEAD_LINES])):
+            out.add(rel)
+        else:
+            rest.append(rel)
+    for i in range(0, len(rest), _ATTR_BATCH):
+        for line in (git(["check-attr", "linguist-generated", "--", *rest[i:i + _ATTR_BATCH]], root) or "").splitlines():
+            path, _, value = line.rpartition(": linguist-generated: ")
+            if value in ("set", "true"):
+                out.add(path)
+    return out
+
+
+def tracked_changes(root, base, cached=False):
+    """Return (relative path, is_new) for tracked files added, modified or renamed since `base`.
+
+    is_new is True when the path has no version in `base`. `cached` compares
+    the index instead of the work tree.
+
+    Why --name-status and not one `cat-file -e` per file: that probe answers
+    exit 128 both for a missing path and for a git that broke, and a wrong
+    "new" makes every old line of the file count as written by the session.
+    """
+    out = []
+    args = ["diff", "--name-status", "--diff-filter=AMR"] + (["--cached"] if cached else []) + [base, "--"]
+    for line in (git(args, root) or "").splitlines():
+        fields = line.split("\t")
+        out.append((fields[-1], fields[0] != "M"))
+    return out
+
+
 def changed_files(root, base, keep=family_of):
     """List (relative path, is_new) for files that differ from `base` or are untracked.
 
@@ -792,12 +962,8 @@ def changed_files(root, base, keep=family_of):
     is_new is True when the file has no version in `base`, so every one of
     its lines counts as added. Deleted files are skipped.
     """
-    out = []
-    tracked = git(["diff", "--name-only", "--diff-filter=AMR", base, "--"], root) or ""
-    for rel in tracked.splitlines():
-        if keep(rel) and os.path.isfile(os.path.join(root, rel)):
-            new = base == EMPTY_TREE or git(["cat-file", "-e", "%s:%s" % (base, rel)], root) is None
-            out.append((rel, new))
+    out = [(rel, new) for rel, new in tracked_changes(root, base)
+           if keep(rel) and os.path.isfile(os.path.join(root, rel))]
     untracked = git(["ls-files", "--others", "--exclude-standard"], root) or ""
     for rel in untracked.splitlines():
         if keep(rel) and os.path.isfile(os.path.join(root, rel)):
@@ -815,9 +981,10 @@ def baseline_text(root, base, rel):
 _HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", re.M)
 
 
-def added_lines(root, base, rel):
-    """Return the 1-based line numbers of `rel` that are new or changed since `base`."""
-    out = git(["diff", "-U0", "--no-color", "--no-ext-diff", base, "--", rel], root) or ""
+def added_lines(root, base, rel, cached=False):
+    """Return the 1-based line numbers of `rel` that are new or changed since `base` (in the index when `cached`)."""
+    out = git(["diff", "-U0", "--no-color", "--no-ext-diff"] + (["--cached"] if cached else []) + [base, "--", rel],
+              root) or ""
     lines = set()
     for m in _HUNK.finditer(out):
         start = int(m.group(1))
